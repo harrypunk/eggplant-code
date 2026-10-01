@@ -23,13 +23,15 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 4. **Helix core first, own core maybe later** — v1 builds on `helix-core` / `helix-view` /
    `helix-loader` (+ `helix-lsp`, `helix-dap`, `helix-vcs` as needed). Design behind our own
    traits/facade so the backend can be swapped later.
-5. **AI-native** — not a full IDE, but AI as a first-class citizen. Investigate:
-   - integrating with **opencode** (agent CLI, has a server/HTTP API) and/or
-     **pi** (coding-agent harness, node SDK) as an external agent backend, vs
-   - translating/porting the agent loop to Rust (own provider abstraction over LLM APIs,
-     tool calling, streaming into editor surfaces).
+5. **AI-native, Rust-native agent** — not a full IDE, but AI as a first-class citizen. After
+   surveying existing agents, we will build a **native Rust agent** adopting the **minimal
+   design philosophy of pi** (not a 100% copy): small core, provider abstraction, tool
+   calling, streaming. No opencode/pi subprocess or server dependency.
    AI UX ideas: chat/prompt panel (toggle), inline edits/diffs in buffer, agent status in
    notifications, apply-patch style edits through the document layer.
+6. **Helix/vim-style modal keys** — the editor adopts helix-style keybindings. First edition
+   reuses helix packages for keymaps/commands where feasible (adapt helix's TOML keymap
+   system); our own key layer can come later with the own-core effort.
 
 ## High-level Architecture
 
@@ -44,9 +46,9 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 │         │              │ ├ floats / dialogs   │  │
 │  ┌──────▼───────┐      │ └ notifications      │  │
 │  │ AI agent     │      └──────────────────────┘  │
-│  │ integration  │                                │
-│  │ (opencode/pi │      ┌──────────────────────┐  │
-│  │  or native)  │      │ keymaps / commands   │  │
+│  │ (native Rust,│                                │
+│  │  pi-inspired │      ┌──────────────────────┐  │
+│  │  minimal)    │      │ keymaps / commands   │  │
 │  └──────┬───────┘      └──────────┬───────────┘  │
 │         │                         │              │
 │  ┌──────▼─────────────────────────▼───────────┐  │
@@ -59,17 +61,17 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 
 ## Open Questions (detail sessions)
 
-1. **AI integration path** (top priority):
-   - a) shell out to opencode/pi as subprocess & stream results (fastest),
-   - b) talk to opencode's HTTP server API (opencode serve),
-   - c) embed a native Rust agent loop (port the pi/opencode core ideas: provider
-        abstraction, tool use, streaming) — most work, most "native".
-   - What capabilities first: chat panel? inline completion? agentic edits with diff review?
-2. **Compositor/layer model**: z-ordered layers vs ratatui layout-tree? How do floats/dialogs
-   capture focus & keys? (study ratatui examples + how helix-term does overlays like pickers)
+1. **Native Rust agent design** (top priority, later milestone):
+   - adopt pi's minimal architecture: small agent loop, provider abstraction (LLM APIs),
+     tool-use schema, streaming events into editor surfaces.
+   - what tools does the agent get (read/edit buffer, shell, LSP)?
+   - what capabilities first: chat panel? inline completion? agentic edits with diff review?
+2. **Compositor/layer model**: deferred — study ratatui (examples, widgets, layout) when we
+   build M2. Reference how helix-term does overlays (pickers) for ideas, but design our own.
 3. **Editor facade API**: define the trait surface (documents, selections, edits, syntax)
    that the UI talks to, so helix-core can be replaced later.
-4. **Keymaps**: reuse helix's TOML keymap/modal system, or define our own?
+4. **Keymaps**: helix/vim-style; v1 reuses/adapts helix's TOML keymap system — check how
+   much of it lives in helix-term vs helix-view, and how separable it is from their UI.
 5. **Runtime assets**: helix runtime dir (themes, tree-sitter queries, languages.toml) — how
    do we load/locate them (XDG, vendored, $EGGPLANT_RUNTIME)?
 6. **LSP**: reuse `helix-lsp` in v1 or defer?
@@ -83,8 +85,8 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 - [ ] **M2 — Compositor v1**: layer/focus system — toggle panels, modal dialogs, notification
       queue; opinionated layout (statusline, gutter, etc.).
 - [ ] **M3 — Keymaps/commands**: modal keys, command palette, save/quit, buffers.
-- [ ] **M4 — AI v1**: first AI surface (decided in Q1) — e.g. prompt panel streaming a
-      response into a buffer/notification, or opencode subprocess integration.
+- [ ] **M4 — AI v1 (native agent)**: minimal Rust agent loop (pi-inspired): provider
+      abstraction + streaming chat into a toggleable panel; grows into agentic edits later.
 - [ ] **M5 — Syntax highlighting**: tree-sitter via helix-core, themes.
 - [ ] **M6 — LSP / AI v2**: LSP features; agentic edits w/ diff review.
 - [ ] **M7+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
@@ -96,5 +98,5 @@ A custom, AI-native terminal editor with an opinionated UI layout.
   or `.gitconfig` insteadOf if cargo has issues.
 - helix pins `rust-toolchain.toml` inside its repo — doesn't affect us as a dependency, but
   watch MSRV (helix 25.7 needs recent stable; our crate is edition 2024).
-- opencode is TS (bun), pi is TS/node — "translate to Rust" means reimplementing their agent
-  loop concepts, not a literal port; study their protocol/tool schemas first.
+- pi is TS/node — we are NOT porting it; the native Rust agent only borrows pi's minimal
+  design ideas (agent loop, provider abstraction, tool schema, streaming).
