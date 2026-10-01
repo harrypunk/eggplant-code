@@ -62,13 +62,14 @@ impl Notification {
     }
 }
 
+#[derive(Default)]
 pub struct Notifications {
     items: Vec<Notification>,
 }
 
 impl Notifications {
     pub fn new() -> Self {
-        Self { items: Vec::new() }
+        Self::default()
     }
 
     pub fn push(&mut self, n: Notification) {

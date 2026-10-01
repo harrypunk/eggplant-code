@@ -80,8 +80,10 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 
 - [x] **M0 — Skeleton**: git deps to gitea forks wired up; ratatui + crossterm event loop;
       basic compositor with editor surface + one floating dialog + notification toast.
-- [ ] **M1 — Headless helix core**: load file into helix Document, normal/insert editing,
+- [x] **M1 — Headless helix core**: load file into helix Document, normal/insert editing,
       cursor/viewport, render through our ratatui surface.
+      (facade `eggplant_core::Editor` wraps helix-view `Document`; block-cursor selection
+      model: range direction encodes mode; own `edits_since_save` modified flag)
 - [ ] **M2 — Compositor v1**: layer/focus system — toggle panels, modal dialogs, notification
       queue; opinionated layout (statusline, gutter, etc.).
 - [ ] **M3 — Keymaps/commands**: modal keys, command palette, save/quit, buffers.
@@ -113,3 +115,18 @@ eggplant-code/
   watch MSRV (helix 25.7 needs recent stable; our crate is edition 2024).
 - pi is TS/node — we are NOT porting it; the native Rust agent only borrows pi's minimal
   design ideas (agent loop, provider abstraction, tool schema, streaming).
+
+## Learnings (helix backend)
+
+- `Document` lives in **helix-view**, not helix-core; needs `Arc<dyn DynAccess<Config>>`
+  (`Arc<ArcSwap<Config>>`) + `Arc<ArcSwap<syntax::Loader>>` (empty loader for now).
+- helix uses **block-cursor selection semantics**: stored selections are always >=1 grapheme
+  wide (`ensure_invariants`); range *direction* encodes mode — forward `(pos, pos+1)` =
+  normal block at `pos`, backward `(pos+1, pos)` = insert bar at `pos`. `Transaction::insert`
+  inserts at `range.head`.
+- Word motions return extended ranges (old -> new); destination: `head` for word-starts,
+  `prev_grapheme(head)` for word-ends.
+- `doc.is_modified()` relies on helix history internals (needs a `View` to flush changes) —
+  the facade tracks its own `edits_since_save` counter instead.
+- `doc.save()` returns a `Future` using `tokio::fs` — polled on a current-thread runtime
+  inside the facade for now.

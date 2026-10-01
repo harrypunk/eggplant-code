@@ -45,13 +45,14 @@ pub trait Layer {
     }
 }
 
+#[derive(Default)]
 pub struct Compositor {
     layers: Vec<Box<dyn Layer>>,
 }
 
 impl Compositor {
     pub fn new() -> Self {
-        Self { layers: Vec::new() }
+        Self::default()
     }
 
     pub fn push(&mut self, layer: Box<dyn Layer>) {

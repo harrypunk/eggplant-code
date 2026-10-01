@@ -63,7 +63,7 @@ impl Layer for Dialog {
         match key.code {
             // Modal dialog: Esc or the toggle key closes it, everything else
             // is swallowed so it can't leak to layers below.
-            KeyCode::Esc | KeyCode::Char('d') => KeyResult::Close,
+            KeyCode::Esc | KeyCode::F(2) => KeyResult::Close,
             _ => KeyResult::Consumed,
         }
     }
