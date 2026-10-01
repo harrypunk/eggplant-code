@@ -8,7 +8,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::App;
-use crate::compositor::Layer;
+use crate::compositor::{KeyResult, Layer};
 
 pub struct EditorSurface {
     lines: Vec<String>,
@@ -58,8 +58,8 @@ impl Layer for EditorSurface {
         frame.render_widget(status, chunks[1]);
     }
 
-    fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> bool {
+    fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {
         // Base surface consumes nothing in M0; global handler owns keys.
-        false
+        KeyResult::Ignored
     }
 }

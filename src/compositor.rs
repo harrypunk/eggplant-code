@@ -10,14 +10,25 @@ use ratatui::layout::Rect;
 
 use crate::app::App;
 
+/// Result of dispatching a key to a layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyResult {
+    /// The layer handled the key; stop propagation.
+    Consumed,
+    /// The layer didn't handle the key; pass it on (e.g. to global keys).
+    Ignored,
+    /// The layer asks the compositor to close (pop) it.
+    Close,
+}
+
 /// A renderable, focusable UI layer.
 pub trait Layer {
     /// Render this layer into `area`.
     fn render(&self, frame: &mut Frame, area: Rect, app: &App);
 
-    /// Handle a key. Return `true` if consumed.
-    fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> bool {
-        false
+    /// Handle a key.
+    fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {
+        KeyResult::Ignored
     }
 
     /// Whether this layer is translucent (layers below still show through).
@@ -58,12 +69,18 @@ impl Compositor {
         self.layers.iter().any(|l| l.is_dialog())
     }
 
-    /// Send a key to the topmost layer. Returns `true` if consumed.
-    pub fn dispatch_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
-        if let Some(top) = self.layers.last_mut() {
-            return top.handle_key(key, app);
+    /// Send a key to the topmost layer.
+    pub fn dispatch_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+        let Some(top) = self.layers.last_mut() else {
+            return KeyResult::Ignored;
+        };
+        match top.handle_key(key, app) {
+            KeyResult::Close => {
+                self.pop();
+                KeyResult::Consumed
+            }
+            other => other,
         }
-        false
     }
 
     /// Render bottom-up. When a translucent layer is on top, everything below

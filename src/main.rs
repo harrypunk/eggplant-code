@@ -21,7 +21,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use crate::app::App;
-use crate::compositor::Compositor;
+use crate::compositor::{Compositor, KeyResult};
 use crate::layers::dialog::Dialog;
 use crate::layers::editor::EditorSurface;
 use crate::layers::notification::{Notification, Notifications};
@@ -99,12 +99,11 @@ fn handle_global_key(
     }
 
     // Let the focused (top) layer handle the key first.
-    if compositor.dispatch_key(key, app) {
+    if compositor.dispatch_key(key, app) != KeyResult::Ignored {
         return false;
     }
 
     match key.code {
-        KeyCode::Esc if compositor.has_dialog() => compositor.pop(),
         KeyCode::Char('q') => return true,
         KeyCode::Char('d') => {
             if compositor.has_dialog() {

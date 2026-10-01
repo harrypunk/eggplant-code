@@ -7,7 +7,7 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 use crate::app::App;
-use crate::compositor::Layer;
+use crate::compositor::{KeyResult, Layer};
 
 pub struct Dialog {
     title: String,
@@ -59,9 +59,13 @@ impl Layer for Dialog {
         frame.render_widget(dialog, area);
     }
 
-    fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> bool {
-        // Swallow everything; closing is handled globally (`d`/`Esc`).
-        matches!(key.code, KeyCode::Char(_) | KeyCode::Esc)
+    fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {
+        match key.code {
+            // Modal dialog: Esc or the toggle key closes it, everything else
+            // is swallowed so it can't leak to layers below.
+            KeyCode::Esc | KeyCode::Char('d') => KeyResult::Close,
+            _ => KeyResult::Consumed,
+        }
     }
 
     fn translucent(&self) -> bool {
