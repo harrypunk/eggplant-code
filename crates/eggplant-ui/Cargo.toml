@@ -1,0 +1,9 @@
+[package]
+name = "eggplant-ui"
+description = "Ratatui-based compositor, layers and widgets"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true

@@ -1,0 +1,8 @@
+[package]
+name = "eggplant-core"
+description = "Editor backend facade (v1: helix-core; swappable later)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+helix-core.workspace = true

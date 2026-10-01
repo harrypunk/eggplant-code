@@ -1,0 +1,7 @@
+[package]
+name = "eggplant-agent"
+description = "Native Rust AI agent (pi-inspired minimal design)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

@@ -91,6 +91,19 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 - [ ] **M6 — LSP / AI v2**: LSP features; agentic edits w/ diff review.
 - [ ] **M7+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
 
+## Workspace layout
+
+```
+eggplant-code/
+├── Cargo.toml            # virtual workspace manifest (shared deps)
+├── AGENTS.md             # repo rules: quality first, SOLID, branch-per-work
+└── crates/
+    ├── eggplant/         # binary: event loop + wiring (package: eggplant-code)
+    ├── eggplant-ui/      # compositor, layers, widgets, UI state (ratatui)
+    ├── eggplant-core/    # editor backend facade (v1 wraps helix-core)
+    └── eggplant-agent/   # native Rust AI agent (placeholder, lands in M4)
+```
+
 ## Notes
 
 - Fork pins (gitea mirrors): helix `079a789` (25.7.1), rataui `7023d4f` (ratatui 0.30.2).

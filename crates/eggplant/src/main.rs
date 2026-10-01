@@ -6,10 +6,6 @@
 //! - notification toasts (`n` to spawn)
 //! - `q` / `Esc` quits (Esc closes top layer first)
 
-mod app;
-mod compositor;
-mod layers;
-
 use std::io;
 use std::time::Duration;
 
@@ -18,13 +14,13 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use eggplant_ui::app::App;
+use eggplant_ui::compositor::{Compositor, KeyResult};
+use eggplant_ui::layers::dialog::Dialog;
+use eggplant_ui::layers::editor::EditorSurface;
+use eggplant_ui::layers::notification::{Notification, Notifications};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use crate::app::App;
-use crate::compositor::{Compositor, KeyResult};
-use crate::layers::dialog::Dialog;
-use crate::layers::editor::EditorSurface;
-use crate::layers::notification::{Notification, Notifications};
 
 fn main() -> io::Result<()> {
     let mut terminal = setup_terminal()?;

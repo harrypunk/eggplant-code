@@ -430,11 +430,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
+name = "eggplant-agent"
+version = "0.1.0"
+
+[[package]]
 name = "eggplant-code"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "eggplant-agent",
+ "eggplant-core",
+ "eggplant-ui",
+ "ratatui",
+]
+
+[[package]]
+name = "eggplant-core"
+version = "0.1.0"
+dependencies = [
  "helix-core",
+]
+
+[[package]]
+name = "eggplant-ui"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
  "ratatui",
 ]
 
