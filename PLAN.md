@@ -78,7 +78,7 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 
 ## Milestones (draft)
 
-- [ ] **M0 — Skeleton**: git deps to gitea forks wired up; ratatui + crossterm event loop;
+- [x] **M0 — Skeleton**: git deps to gitea forks wired up; ratatui + crossterm event loop;
       basic compositor with editor surface + one floating dialog + notification toast.
 - [ ] **M1 — Headless helix core**: load file into helix Document, normal/insert editing,
       cursor/viewport, render through our ratatui surface.
