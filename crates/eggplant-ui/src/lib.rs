@@ -6,3 +6,4 @@
 pub mod app;
 pub mod compositor;
 pub mod layers;
+pub mod statusline;

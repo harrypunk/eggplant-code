@@ -84,8 +84,11 @@ A custom, AI-native terminal editor with an opinionated UI layout.
       cursor/viewport, render through our ratatui surface.
       (facade `eggplant_core::Editor` wraps helix-view `Document`; block-cursor selection
       model: range direction encodes mode; own `edits_since_save` modified flag)
-- [ ] **M2 — Compositor v1**: layer/focus system — toggle panels, modal dialogs, notification
+- [x] **M2 — Compositor v1**: layer/focus system — toggle panels, modal dialogs, notification
       queue; opinionated layout (statusline, gutter, etc.).
+      (LayerKind Base/Panel/Float drives pure `compute_layout`; focus: push→focus, `C-w` cycle,
+      Esc→Unfocus vs Close; statusline extracted to global chrome; files panel `C-e`;
+      confirm-quit dialog `C-q`; notification queue cap 5 + "+N more")
 - [ ] **M3 — Keymaps/commands**: modal keys, command palette, save/quit, buffers.
 - [ ] **M4 — AI v1 (native agent)**: minimal Rust agent loop (pi-inspired): provider
       abstraction + streaming chat into a toggleable panel; grows into agentic edits later.
@@ -130,3 +133,5 @@ eggplant-code/
   the facade tracks its own `edits_since_save` counter instead.
 - `doc.save()` returns a `Future` using `tokio::fs` — polled on a current-thread runtime
   inside the facade for now.
+- **Key routing**: focused layer first (modal layers swallow all), then globals. Char bindings
+  must guard against Ctrl/Alt modifiers (`plain_char` helper) or Ctrl-combos leak into text.

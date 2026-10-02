@@ -53,6 +53,9 @@ pub struct Editor {
     /// Edit transactions applied since the last save (our own modified flag,
     /// independent of helix internals so the facade stays backend-agnostic).
     edits_since_save: usize,
+    /// Bumped whenever the underlying document is replaced (open_file), so
+    /// the UI can drop per-document state (scroll offsets, ...).
+    generation: usize,
     backend: Backend,
 }
 
@@ -78,6 +81,35 @@ impl Editor {
         Ok(Self::from_doc(doc, backend))
     }
 
+    /// Replace the current document with the file at `path`.
+    ///
+    /// NOTE: there are no buffers yet (M3+) — this discards the current
+    /// document. Callers should check `is_modified()` first.
+    pub fn open_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let doc = Document::open(
+            path.as_ref(),
+            None,
+            false,
+            self.backend.config.clone(),
+            self.backend.syn_loader.clone(),
+        )
+        .with_context(|| format!("failed to open {}", path.as_ref().display()))?;
+        self.set_doc(doc);
+        Ok(())
+    }
+
+    fn set_doc(&mut self, doc: Document) {
+        self.doc = doc;
+        self.doc.set_selection(self.view_id, Selection::point(0));
+        self.edits_since_save = 0;
+        self.generation += 1;
+    }
+
+    /// Document replacement counter — the UI resets scroll etc. when it changes.
+    pub fn generation(&self) -> usize {
+        self.generation
+    }
+
     fn from_doc(mut doc: Document, backend: Backend) -> Self {
         let view_id = ViewId::default();
         doc.set_selection(view_id, Selection::point(0));
@@ -86,6 +118,7 @@ impl Editor {
             view_id,
             mode: Mode::Normal,
             edits_since_save: 0,
+            generation: 0,
             backend,
         }
     }
@@ -555,6 +588,30 @@ mod tests {
         ed.move_line_end();
         assert_eq!(ed.cursor(), (1, 2)); // on 'e', not 'd'
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn open_file_replaces_document() {
+        let dir = std::env::temp_dir();
+        let path_a = dir.join(format!("eggplant-a-{}", std::process::id()));
+        let path_b = dir.join(format!("eggplant-b-{}", std::process::id()));
+        std::fs::write(&path_a, "aaa").unwrap();
+        std::fs::write(&path_b, "bbb\nccc").unwrap();
+
+        let mut ed = Editor::open(&path_a).unwrap();
+        let generation = ed.generation();
+        ed.enter_insert();
+        ed.insert_str("dirty");
+        assert!(ed.is_modified());
+
+        ed.open_file(&path_b).unwrap();
+        assert_eq!(text_of(&ed), "bbb\nccc");
+        assert!(!ed.is_modified());
+        assert!(ed.generation() > generation);
+        assert_eq!(ed.cursor(), (0, 0));
+
+        std::fs::remove_file(&path_a).unwrap();
+        std::fs::remove_file(&path_b).unwrap();
     }
 
     #[test]

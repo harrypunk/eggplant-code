@@ -1,9 +1,9 @@
 //! eggplant-code — event loop + compositor wiring.
 //!
 //! - base layer: editor surface (helix-core document, modal editing)
-//! - floating dialog layer (`F2` to toggle, demo)
-//! - notification toasts (`F3` to spawn, demo)
-//! - `Ctrl-C`/`Ctrl-Q` quits; `Ctrl-S` saves
+//! - `Ctrl-E`: toggle file-explorer panel; `Ctrl-W`: cycle focus
+//! - floating dialog layer (`F2` demo), notification toasts (`F3` demo)
+//! - `Ctrl-Q` quits (confirms on unsaved changes); `Ctrl-C` force-quits
 
 use std::io;
 use std::path::PathBuf;
@@ -17,8 +17,9 @@ use crossterm::terminal::{
 use eggplant_core::Editor;
 use eggplant_ui::app::App;
 use eggplant_ui::compositor::{Compositor, KeyResult};
-use eggplant_ui::layers::dialog::Dialog;
+use eggplant_ui::layers::dialog::{ConfirmDialog, Dialog};
 use eggplant_ui::layers::editor::EditorSurface;
+use eggplant_ui::layers::files_panel::{self, FilesPanel};
 use eggplant_ui::layers::notification::Notification;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -75,7 +76,8 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, editor: Editor) ->
 
         match event::read()? {
             Event::Key(key) => {
-                if handle_global_key(key, &mut app, &mut compositor) {
+                handle_key(key, &mut app, &mut compositor);
+                if app.should_quit {
                     break;
                 }
             }
@@ -86,41 +88,61 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, editor: Editor) ->
     Ok(())
 }
 
-/// Global keys. Returns `true` when the app should quit.
-///
-/// Focus model: the topmost layer gets keys first; if it doesn't consume
-/// them, they fall through to global handling here.
-fn handle_global_key(key: KeyEvent, app: &mut App, compositor: &mut Compositor) -> bool {
-    if key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('q'))
-    {
-        return true;
-    }
-
-    // Let the focused (top) layer handle the key first.
+/// Key routing: the focused layer gets keys first (modal layers swallow
+/// everything); whatever falls through is handled by global bindings here.
+fn handle_key(key: KeyEvent, app: &mut App, compositor: &mut Compositor) {
     if compositor.dispatch_key(key, app) != KeyResult::Ignored {
-        return false;
+        return;
     }
 
-    match key.code {
-        KeyCode::F(2) => {
-            if compositor.has_dialog() {
-                compositor.pop();
-            } else {
-                compositor.push(Box::new(Dialog::new(
-                    "dialog",
-                    "floating layers work.\n\n`F2` or `Esc` closes me.",
-                )));
+    let ctrl =
+        |c: char| key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char(c);
+
+    if ctrl('c') {
+        app.should_quit = true; // force quit, no confirm
+    } else if ctrl('q') {
+        if app.editor.is_modified() {
+            compositor.push(Box::new(ConfirmDialog::new(
+                "unsaved changes",
+                "Quit without saving?",
+                |app: &mut App| app.should_quit = true,
+            )));
+        } else {
+            app.should_quit = true;
+        }
+    } else if ctrl('e') {
+        if compositor.has(files_panel::PANEL_ID) {
+            compositor.remove_by_id(files_panel::PANEL_ID);
+        } else {
+            match FilesPanel::new(std::env::current_dir().unwrap_or_default()) {
+                Ok(panel) => compositor.push(Box::new(panel)),
+                Err(err) => app
+                    .notifications
+                    .push(Notification::error(format!("files panel: {err}"))),
             }
         }
-        KeyCode::F(3) => {
-            app.tick_count += 1;
-            app.notifications.push(Notification::info(format!(
-                "notification #{}",
-                app.tick_count
-            )));
+    } else if ctrl('w') {
+        compositor.focus_next();
+    } else {
+        match key.code {
+            KeyCode::F(2) => {
+                if compositor.has("dialog") {
+                    compositor.remove_by_id("dialog");
+                } else {
+                    compositor.push(Box::new(Dialog::new(
+                        "dialog",
+                        "floating layers work.\n\n`F2` or `Esc` closes me.",
+                    )));
+                }
+            }
+            KeyCode::F(3) => {
+                app.tick_count += 1;
+                app.notifications.push(Notification::info(format!(
+                    "notification #{}",
+                    app.tick_count
+                )));
+            }
+            _ => {}
         }
-        _ => {}
     }
-    false
 }
