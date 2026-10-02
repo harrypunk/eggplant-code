@@ -46,6 +46,20 @@ Write declarative code as much as possible — it reads better and is easier to 
   (e.g. `feat/helix-document`, `fix/dialog-keys`, `chore/workspace-skeleton`).
 - Merge back to `main` only when the work builds clean and the user confirms.
 
+## Rule 5 — UI = f(state)
+
+Rendering is a pure function of state (the Compose/React/Vue contract — this is why we
+chose ratatui):
+
+- `render(&self, …)` never mutates: no interior mutability smuggling writes into render,
+  no I/O, no "prune while we're here". Painting the frame is the only effect.
+- State changes live in event handlers (`handle_key`), commands, and lifecycle hooks
+  (`Layer::resize`, tick pruning in the event loop) — never in render.
+- Derive, don't cache: filtered lists, layout, gutter text are computed in render from
+  state. Cache only what's genuinely expensive.
+- State lives in the model (`App`, the core facade, layer structs); the widget tree is a
+  projection of it.
+
 ## Project references
 
 - `PLAN.md` — roadmap, decisions, milestones. Keep it updated as decisions are made and
