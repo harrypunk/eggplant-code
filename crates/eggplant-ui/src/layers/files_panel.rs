@@ -9,14 +9,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders};
 
 use crate::app::App;
+use crate::components::files_panel::{self, EntryProps, FilesPanelProps};
 use crate::compositor::{KeyResult, Layer, LayerKind, Side};
+use crate::element::Element;
 use crate::layers::notification::Notification;
 
 pub const PANEL_ID: &str = "files";
@@ -33,9 +32,8 @@ pub struct FilesPanel {
     selected: usize,
     /// First visible row (scroll offset within the list).
     offset: usize,
-    /// Last rendered inner height, for scroll bookkeeping in key handling.
     /// Inner list height from the compositor's `resize` hook; used to keep the
-    /// selection visible. Updated outside `render` (Rule 5).
+    /// selection visible. Updated outside the view path (Rule 5).
     inner_height: usize,
 }
 
@@ -128,45 +126,24 @@ impl FilesPanel {
 }
 
 impl Layer for FilesPanel {
-    fn render(&self, frame: &mut Frame, area: Rect, _app: &App, focused: bool) {
-        frame.render_widget(Clear, area); // panels are opaque
-        let border_style = if focused {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(border_style)
-            .title(format!(" {} ", self.dir.display()));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        let rows: Vec<Line> = self
-            .entries
-            .iter()
-            .enumerate()
-            .skip(self.offset)
-            .take(inner.height as usize)
-            .map(|(i, entry)| {
-                let label = if entry.is_dir {
-                    format!("{}/", entry.name)
-                } else {
-                    entry.name.clone()
-                };
-                let style = if i == self.selected {
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD)
-                } else if entry.is_dir {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default()
-                };
-                Line::from(Span::styled(label, style))
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(rows), inner);
+    fn view(&self, area: Rect, _app: &App, focused: bool) -> Element<'_> {
+        files_panel::view(
+            &FilesPanelProps {
+                title: self.dir.display().to_string(),
+                entries: self
+                    .entries
+                    .iter()
+                    .skip(self.offset)
+                    .map(|entry| EntryProps {
+                        name: entry.name.clone(),
+                        is_dir: entry.is_dir,
+                    })
+                    .collect(),
+                selected_in_view: self.selected - self.offset,
+                focused,
+            },
+            area,
+        )
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {

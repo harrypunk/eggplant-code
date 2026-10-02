@@ -1,43 +1,12 @@
 //! Floating dialog layers: a generic message dialog and a yes/no confirm dialog.
 
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::layout::Rect;
 
 use crate::app::App;
+use crate::components::dialog;
 use crate::compositor::{KeyResult, Layer, LayerKind};
-
-/// Centered rect of `percent_x`/`percent_y` within `area`.
-fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
-    let [_, vertical, _] = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .areas(area);
-    let [_, horizontal, _] = Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .areas(vertical);
-    horizontal
-}
-
-/// Render an opaque, centered floating box with a title.
-fn render_float(frame: &mut Frame, area: Rect, title: &str, body: &str) {
-    let area = centered(area, 50, 30);
-    frame.render_widget(Clear, area);
-    let dialog = Paragraph::new(body).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" {title} "))
-            .style(Style::default().bg(Color::Black)),
-    );
-    frame.render_widget(dialog.wrap(Wrap { trim: false }), area);
-}
+use crate::element::Element;
 
 /// Simple modal message dialog (demo of the float layer kind).
 pub struct Dialog {
@@ -55,8 +24,8 @@ impl Dialog {
 }
 
 impl Layer for Dialog {
-    fn render(&self, frame: &mut Frame, area: Rect, _app: &App, _focused: bool) {
-        render_float(frame, area, &self.title, &self.body);
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+        dialog::dialog_view(&self.title, &self.body, area)
     }
 
     fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {
@@ -102,9 +71,8 @@ impl ConfirmDialog {
 }
 
 impl Layer for ConfirmDialog {
-    fn render(&self, frame: &mut Frame, area: Rect, _app: &App, _focused: bool) {
-        let body = format!("{}\n\n[y] yes   [n] no", self.message);
-        render_float(frame, area, &self.title, &body);
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+        dialog::confirm_view(&self.title, &self.message, area)
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {

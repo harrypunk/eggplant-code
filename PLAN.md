@@ -140,6 +140,10 @@ eggplant-code/
   inside the facade for now.
 - **Key routing**: focused layer first (modal layers swallow all), then globals. Char bindings
   must guard against Ctrl/Alt modifiers (`plain_char` helper) or Ctrl-combos leak into text.
+- **Declarative UI**: components (`components/`) are pure props→`Element` fns; containers
+  (`layers/`) own state/events and adapt `App`→props; `element.rs::paint` is the only
+  `Frame` toucher. Cursor is data (`Element::Cursor`); last painted wins (topmost layer).
+  Paint smoke-tests use ratatui's `TestBackend`.
 - **Layers can't touch the compositor** — they return effects instead: `KeyResult::Push`,
   `Execute(Command)`, `RunEx(input)`; the compositor performs them (close-then-run semantics).
 - `Command` is `Copy` (fn ptr + &'static str) so registry lookups return by value — avoids

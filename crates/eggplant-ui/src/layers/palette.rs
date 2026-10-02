@@ -1,19 +1,16 @@
-//! The command palette (`Space` in normal mode) — fuzzy search over the
-//! command registry. `Enter` runs the selected command, `Esc` closes.
+//! The command palette container (`Space` in normal mode) — owns the input
+//! and selection, derives the filtered list (selector), delegates rendering
+//! to the pure `components::palette` view.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::layout::Rect;
 
 use crate::app::App;
 use crate::commands::Command;
+use crate::components::palette::{self, PaletteItem, PaletteProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::element::Element;
 use crate::fuzzy;
-
-const MAX_ROWS: usize = 8;
 
 pub struct Palette {
     input: String,
@@ -31,11 +28,11 @@ impl Palette {
         }
     }
 
-    /// Commands matching the current input, best first, capped for display.
+    /// Selector: commands matching the current input, best first, capped.
     fn filtered(&self) -> Vec<Command> {
         fuzzy::filter(&self.input, &self.commands, |c| c.id)
             .into_iter()
-            .take(MAX_ROWS)
+            .take(palette::MAX_ROWS as usize)
             .map(|(_, command)| *command)
             .collect()
     }
@@ -50,54 +47,23 @@ impl Palette {
 }
 
 impl Layer for Palette {
-    fn render(&self, frame: &mut Frame, area: Rect, _app: &App, _focused: bool) {
-        // Centered horizontally, hugging the top of the body area.
-        let width = (area.width * 3 / 5).max(30).min(area.width);
-        let height = (MAX_ROWS as u16 + 3).min(area.height); // input + rows + borders
-        let rect = Rect {
-            x: area.x + (area.width - width) / 2,
-            y: area.y + 1,
-            width,
-            height,
-        };
-        frame.render_widget(Clear, rect);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" palette ")
-            .style(Style::default().bg(Color::Black));
-        let inner = block.inner(rect);
-        frame.render_widget(block, rect);
-
-        let [input_area, list_area] =
-            Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(inner);
-
-        let input = Line::from(vec![
-            Span::styled("> ", Style::default().fg(Color::Cyan)),
-            Span::raw(&self.input),
-        ]);
-        frame.render_widget(Paragraph::new(input), input_area);
-        frame.set_cursor_position((input_area.x + 2 + self.input.len() as u16, input_area.y));
-
-        let rows: Vec<Line> = self
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+        let items = self
             .filtered()
-            .into_iter()
-            .enumerate()
-            .map(|(i, command)| {
-                let style = if i == self.selected {
-                    Style::default()
-                        .bg(Color::DarkGray)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                Line::from(vec![
-                    Span::styled(format!(" {:<20}", command.id), style),
-                    Span::styled(command.description, style.fg(Color::Gray)),
-                ])
+            .iter()
+            .map(|command| PaletteItem {
+                id: command.id,
+                description: command.description,
             })
             .collect();
-        frame.render_widget(Paragraph::new(rows), list_area);
+        palette::view(
+            &PaletteProps {
+                input: &self.input,
+                items,
+                selected: self.selected,
+            },
+            area,
+        )
     }
 
     fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {

@@ -1,18 +1,14 @@
-//! Notification toasts — rendered above all layers, never focused.
+//! Notification toasts — the model (queue + expiry) lives here; the view is
+//! the pure `components::toasts` function.
 
 use std::time::{Duration, Instant};
 
-use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::layout::Rect;
 
-const WIDTH: u16 = 40;
-const HEIGHT: u16 = 3;
-const MARGIN: u16 = 1;
+use crate::components::toasts::{self, ToastProps};
+use crate::element::Element;
+
 const TTL: Duration = Duration::from_secs(4);
-/// How many toasts are shown at once; older ones collapse into a "+N more" row.
-const MAX_VISIBLE: usize = 5;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Level {
@@ -51,15 +47,6 @@ impl Notification {
     fn is_visible(&self) -> bool {
         self.created.elapsed() < TTL
     }
-
-    fn border_style(&self) -> Style {
-        let color = match self.level {
-            Level::Info => Color::Cyan,
-            Level::Warn => Color::Yellow,
-            Level::Error => Color::Red,
-        };
-        Style::default().fg(color).add_modifier(Modifier::BOLD)
-    }
 }
 
 #[derive(Default)]
@@ -80,48 +67,17 @@ impl Notifications {
         self.items.retain(Notification::is_visible);
     }
 
-    /// Render stacked in the top-right corner, newest last (on top).
-    /// Overflow beyond `MAX_VISIBLE` collapses into a summary row.
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let visible: Vec<&Notification> = self.items.iter().filter(|n| n.is_visible()).collect();
-        let hidden = visible.len().saturating_sub(MAX_VISIBLE);
-
-        if hidden > 0 {
-            let rect = Rect::new(
-                area.x + area.width.saturating_sub(WIDTH + MARGIN),
-                area.y + MARGIN,
-                WIDTH.min(area.width),
-                1,
-            );
-            frame.render_widget(Clear, rect);
-            frame.render_widget(
-                Paragraph::new(format!("+{hidden} earlier"))
-                    .style(Style::default().fg(Color::DarkGray)),
-                rect,
-            );
-        }
-
-        for (i, n) in visible.iter().skip(hidden).enumerate() {
-            let y = area.y + MARGIN + u16::from(hidden > 0) + i as u16 * HEIGHT;
-            if y + HEIGHT > area.height {
-                break;
-            }
-            let rect = Rect::new(
-                area.x + area.width.saturating_sub(WIDTH + MARGIN),
-                y,
-                WIDTH.min(area.width),
-                HEIGHT,
-            );
-            frame.render_widget(Clear, rect);
-            let toast = Paragraph::new(n.message.as_str())
-                .alignment(Alignment::Left)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(n.border_style())
-                        .style(Style::default().bg(Color::Black)),
-                );
-            frame.render_widget(toast, rect);
-        }
+    /// Project visible notifications into the pure toast component.
+    pub fn view(&self, area: Rect) -> Element<'_> {
+        let toasts: Vec<ToastProps> = self
+            .items
+            .iter()
+            .filter(|n| n.is_visible())
+            .map(|n| ToastProps {
+                message: n.message.as_str(),
+                level: n.level,
+            })
+            .collect();
+        toasts::view(&toasts, area)
     }
 }

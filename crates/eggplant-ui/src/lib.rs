@@ -1,11 +1,16 @@
 //! eggplant-ui — ratatui-based UI toolkit for eggplant-code.
 //!
-//! Owns the compositor (z-ordered layers), built-in layers (editor surface,
-//! dialogs, notifications) and shared UI state.
+//! Architecture (Rule 5, UI = f(state)):
+//! - `components/` — pure view functions: props in, `Element` tree out.
+//! - `layers/` + chrome adapters — containers: state, events, prop mapping.
+//! - `element.rs` — the declarative tree + `paint`, the only `Frame` toucher.
+//! - `compositor.rs` — z-ordered layers, layout, focus, key dispatch.
 
 pub mod app;
 pub mod commands;
+pub mod components;
 pub mod compositor;
+pub mod element;
 pub mod ex_commands;
 pub mod fuzzy;
 pub mod layers;

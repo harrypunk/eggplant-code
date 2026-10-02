@@ -12,6 +12,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 
 use crate::app::App;
 use crate::commands::Command;
+use crate::element::{self, Element};
 use crate::statusline;
 
 /// Result of dispatching a key to a layer.
@@ -54,10 +55,14 @@ pub enum LayerKind {
     Float,
 }
 
-/// A renderable, focusable UI layer.
+/// A renderable, focusable UI layer — the *container* half of Rule 5.
+///
+/// Containers own state and handle events (effects); their `view` maps
+/// state to props and delegates to a pure component in `crate::components`.
 pub trait Layer {
-    /// Render this layer into `area`. `focused` is hint for border/highlight styles.
-    fn render(&self, frame: &mut Frame, area: Rect, app: &App, focused: bool);
+    /// Describe this layer's UI as an element tree. Pure: no mutation, no
+    /// painting — the compositor paints the returned tree (Rule 5).
+    fn view(&self, area: Rect, app: &App, focused: bool) -> Element<'_>;
 
     /// Handle a key.
     fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {
@@ -258,19 +263,31 @@ impl Compositor {
         }
     }
 
-    /// Render all layers bottom-up, then the statusline chrome. Pure: state
-    /// updates belong in `resize` / `handle_key` (Rule 5).
+    /// Paint the whole screen: layer views bottom-up, then chrome. Pure with
+    /// respect to state — this only interprets element trees (Rule 5).
     pub fn render(&self, frame: &mut Frame, area: Rect, app: &App) {
         let kinds: Vec<LayerKind> = self.layers.iter().map(|layer| layer.kind()).collect();
         let solution = compute_layout(&kinds, area);
         let focused = self.focused_index();
-
-        for (i, layer) in self.layers.iter().enumerate() {
-            layer.render(frame, solution.layer_areas[i], app, i == focused);
-        }
-
         let focused_id = self.layers.get(focused).map(|layer| layer.id());
-        statusline::render(frame, solution.statusline, app, focused_id);
+
+        let tree = Element::Stack(
+            self.layers
+                .iter()
+                .enumerate()
+                .map(|(i, layer)| {
+                    Element::fixed(
+                        solution.layer_areas[i],
+                        layer.view(solution.layer_areas[i], app, i == focused),
+                    )
+                })
+                .chain([
+                    statusline::view(app, focused_id, solution.statusline),
+                    app.notifications.view(area),
+                ])
+                .collect(),
+        );
+        element::paint(frame, tree, area);
     }
 }
 

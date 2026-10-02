@@ -6,15 +6,13 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use eggplant_core::Mode;
-use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::layout::Rect;
 
 use crate::app::App;
 use crate::commands::KeyStroke;
+use crate::components::editor::{self, EditorProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::element::Element;
 use crate::layers::command_line::CommandLine;
 use crate::layers::palette::Palette;
 
@@ -222,43 +220,6 @@ impl EditorSurface {
         }
     }
 
-    fn render_text_area(&self, frame: &mut Frame, area: Rect, app: &App) {
-        let gutter_width = app.editor.line_count().max(1).ilog10() as u16 + 2;
-        let [gutter_area, text_area] =
-            Layout::horizontal([Constraint::Length(gutter_width), Constraint::Min(1)]).areas(area);
-
-        let (cursor_line, cursor_col) = app.editor.cursor();
-        let lines = app
-            .editor
-            .lines(self.scroll..self.scroll + area.height as usize);
-
-        // Gutter: line numbers, current line emphasized.
-        let gutter: Vec<Line> = (self.scroll..self.scroll + lines.len())
-            .map(|n| {
-                let style = if n == cursor_line {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                };
-                Line::from(Span::styled(
-                    format!("{:>w$} ", n + 1, w = (gutter_width - 1) as usize),
-                    style,
-                ))
-            })
-            .collect();
-        frame.render_widget(Paragraph::new(gutter), gutter_area);
-
-        let text: Vec<Line> = lines.into_iter().map(Line::from).collect();
-        frame.render_widget(Paragraph::new(text), text_area);
-
-        // Terminal cursor tracks the editor cursor (char-col ≈ display col for now).
-        let cursor_x = text_area.x + cursor_col as u16;
-        let cursor_y = text_area.y + (cursor_line - self.scroll) as u16;
-        if cursor_x < text_area.right() && cursor_y < text_area.bottom() {
-            frame.set_cursor_position((cursor_x, cursor_y));
-        }
-    }
-
     // ---- key handling ----
 
     fn handle_normal_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
@@ -296,8 +257,18 @@ impl EditorSurface {
 }
 
 impl Layer for EditorSurface {
-    fn render(&self, frame: &mut Frame, area: Rect, app: &App, _focused: bool) {
-        self.render_text_area(frame, area, app);
+    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element<'_> {
+        editor::view(
+            &EditorProps {
+                lines: app
+                    .editor
+                    .lines(self.scroll..self.scroll + area.height as usize),
+                scroll: self.scroll,
+                line_count: app.editor.line_count(),
+                cursor: app.editor.cursor(),
+            },
+            area,
+        )
     }
 
     fn resize(&mut self, area: Rect, app: &App) {

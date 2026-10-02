@@ -56,10 +56,7 @@ fn event_loop(terminal: &mut CrosstermTerminal, editor: Editor) -> io::Result<()
         let size = terminal.size()?;
         let area = Rect::new(0, 0, size.width, size.height);
         compositor.resize(area, &app);
-        terminal.draw(|frame| {
-            compositor.render(frame, area, &app);
-            app.notifications.render(frame, area);
-        })?;
+        terminal.draw(|frame| compositor.render(frame, area, &app))?;
 
         // Drain expired notifications each tick.
         app.notifications.retain_visible();
