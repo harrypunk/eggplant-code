@@ -476,11 +476,9 @@ version = "0.1.0"
 name = "eggplant-code"
 version = "0.1.0"
 dependencies = [
- "crossterm",
  "eggplant-agent",
  "eggplant-core",
  "eggplant-ui",
- "ratatui",
 ]
 
 [[package]]

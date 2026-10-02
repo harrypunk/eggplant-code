@@ -8,5 +8,3 @@ edition.workspace = true
 eggplant-ui.workspace = true
 eggplant-core.workspace = true
 eggplant-agent.workspace = true
-ratatui.workspace = true
-crossterm.workspace = true
