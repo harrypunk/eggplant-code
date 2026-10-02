@@ -89,7 +89,12 @@ A custom, AI-native terminal editor with an opinionated UI layout.
       (LayerKind Base/Panel/Float drives pure `compute_layout`; focus: push→focus, `C-w` cycle,
       Esc→Unfocus vs Close; statusline extracted to global chrome; files panel `C-e`;
       confirm-quit dialog `C-q`; notification queue cap 5 + "+N more")
-- [ ] **M3 — Keymaps/commands**: modal keys, command palette, save/quit, buffers.
+- [x] **M3 — Keymaps/commands**: modal keys, command palette, save/quit, buffers.
+      (decision: own keymap tables, NOT helix's TOML system — lives in helix-term, coupled to
+      its command enum. Registry: commands defined once, keymap references by index.
+      `:` command line → ex_commands table (w/q/wq/q!/e/b/bd/bn/bp/ls); palette on `Space`
+      with own fuzzy matcher; editor mode keymaps as data tables + count prefixes (`5j`,`nG`);
+      buffers: open/switch/next/prev/close in facade)
 - [ ] **M4 — AI v1 (native agent)**: minimal Rust agent loop (pi-inspired): provider
       abstraction + streaming chat into a toggleable panel; grows into agentic edits later.
 - [ ] **M5 — Syntax highlighting**: tree-sitter via helix-core, themes.
@@ -135,3 +140,7 @@ eggplant-code/
   inside the facade for now.
 - **Key routing**: focused layer first (modal layers swallow all), then globals. Char bindings
   must guard against Ctrl/Alt modifiers (`plain_char` helper) or Ctrl-combos leak into text.
+- **Layers can't touch the compositor** — they return effects instead: `KeyResult::Push`,
+  `Execute(Command)`, `RunEx(input)`; the compositor performs them (close-then-run semantics).
+- `Command` is `Copy` (fn ptr + &'static str) so registry lookups return by value — avoids
+  borrow conflicts when executing with `&mut App`.

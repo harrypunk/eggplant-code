@@ -11,10 +11,14 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 
 use crate::app::App;
+use crate::commands::Command;
 use crate::statusline;
 
 /// Result of dispatching a key to a layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Structural results (`Close`, `Unfocus`, `Push`) are handled by the
+/// compositor itself; `Execute`/`RunEx` are effects the compositor runs on
+/// the layer's behalf (layers can't touch the compositor directly).
 pub enum KeyResult {
     /// The layer handled the key; stop propagation.
     Consumed,
@@ -24,6 +28,12 @@ pub enum KeyResult {
     Close,
     /// The layer asks the compositor to move focus back to the base layer.
     Unfocus,
+    /// The layer asks the compositor to push a new layer (takes focus).
+    Push(Box<dyn Layer>),
+    /// Close this layer, then run a registry command.
+    Execute(Command),
+    /// Close this layer, then run a `:` command line input.
+    RunEx(String),
 }
 
 /// Which side a panel docks against.
@@ -198,20 +208,35 @@ impl Compositor {
         self.focus = Some(0);
     }
 
-    /// Send a key to the focused layer, applying any structural request
-    /// (close/unfocus) it returns.
+    /// Send a key to the focused layer, applying any structural request or
+    /// effect (close/unfocus/push/execute/ex) it returns.
     pub fn dispatch_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
         let index = self.focused_index();
         let Some(layer) = self.layers.get_mut(index) else {
             return KeyResult::Ignored;
         };
-        match layer.handle_key(key, app) {
+        let result = layer.handle_key(key, app);
+        match result {
             KeyResult::Close => {
                 self.remove(index);
                 KeyResult::Consumed
             }
             KeyResult::Unfocus => {
                 self.unfocus();
+                KeyResult::Consumed
+            }
+            KeyResult::Push(layer) => {
+                self.push(layer);
+                KeyResult::Consumed
+            }
+            KeyResult::Execute(command) => {
+                self.remove(index);
+                (command.execute)(app, self);
+                KeyResult::Consumed
+            }
+            KeyResult::RunEx(input) => {
+                self.remove(index);
+                crate::ex_commands::execute(app, self, &input);
                 KeyResult::Consumed
             }
             other => other,

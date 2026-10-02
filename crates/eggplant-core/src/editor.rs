@@ -154,11 +154,7 @@ impl Editor {
     /// open, switches to its buffer instead of duplicating.
     pub fn open_buffer(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        if let Some(index) = self
-            .buffers
-            .iter()
-            .position(|b| b.doc.path() == Some(path))
-        {
+        if let Some(index) = self.buffers.iter().position(|b| b.doc.path() == Some(path)) {
             self.switch_buffer(index)?;
             return Ok(());
         }
@@ -426,6 +422,13 @@ impl Editor {
         let (_, col) = self.cursor();
         let last = self.line_count().saturating_sub(1);
         self.set_cursor_on_line(last, col);
+    }
+
+    /// Go to `line` (0-based, clamped), keeping the column where possible.
+    pub fn move_to_line(&mut self, line: usize) {
+        let (_, col) = self.cursor();
+        let target = line.min(self.line_count().saturating_sub(1));
+        self.set_cursor_on_line(target, col);
     }
 
     pub fn move_word_forward(&mut self, count: usize) {

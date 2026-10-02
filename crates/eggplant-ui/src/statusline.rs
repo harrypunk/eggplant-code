@@ -18,6 +18,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, focused_layer: Option<&'
         Mode::Insert => Color::Green,
     };
     let modified = if app.editor.is_modified() { " [+]" } else { "" };
+    let buffers = if app.editor.buffer_count() > 1 {
+        format!(
+            " ({}/{})",
+            app.editor.current_buffer() + 1,
+            app.editor.buffer_count()
+        )
+    } else {
+        String::new()
+    };
     let focus_tag = match focused_layer {
         Some(id) if id != "editor" => format!(" ‹{id}›"),
         _ => String::new(),
@@ -41,7 +50,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, focused_layer: Option<&'
                 .bg(mode_bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!(" {}{modified}", app.editor.display_name())),
+        Span::raw(format!(" {}{modified}{buffers}", app.editor.display_name())),
         Span::styled(focus_tag, Style::default().fg(Color::Yellow)),
         Span::raw(" ".repeat(padding)),
         Span::raw(right),

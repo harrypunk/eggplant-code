@@ -2,6 +2,7 @@
 
 use eggplant_core::Editor;
 
+use crate::commands::{self, Registry};
 use crate::layers::notification::Notifications;
 
 /// Application lifecycle status. Not a `bool`: quitting is a state
@@ -19,6 +20,8 @@ pub enum Lifecycle {
 pub struct App {
     pub editor: Editor,
     pub notifications: Notifications,
+    /// The command registry: global keymap + palette contents.
+    pub registry: Registry,
     lifecycle: Lifecycle,
     /// Demo counter for the `F3` notification-spam key (until real producers exist).
     pub tick_count: u32,
@@ -29,6 +32,7 @@ impl App {
         Self {
             editor,
             notifications: Notifications::new(),
+            registry: commands::default_registry(),
             lifecycle: Lifecycle::Running,
             tick_count: 0,
         }

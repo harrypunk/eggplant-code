@@ -6,6 +6,8 @@
 pub mod app;
 pub mod commands;
 pub mod compositor;
+pub mod ex_commands;
+pub mod fuzzy;
 pub mod layers;
 pub mod runner;
 pub mod statusline;

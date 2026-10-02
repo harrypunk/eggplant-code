@@ -13,7 +13,6 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app::App;
-use crate::commands::global_keymap;
 use crate::compositor::{Compositor, KeyResult};
 use crate::layers::editor::EditorSurface;
 use crate::layers::notification::Notification;
@@ -43,7 +42,6 @@ fn restore_terminal(terminal: &mut CrosstermTerminal) -> io::Result<()> {
 
 fn event_loop(terminal: &mut CrosstermTerminal, editor: Editor) -> io::Result<()> {
     let mut app = App::new(editor);
-    let keymap = global_keymap();
     let mut compositor = Compositor::new();
 
     // Base layer: the editor surface. Later layers stack on top.
@@ -69,8 +67,8 @@ fn event_loop(terminal: &mut CrosstermTerminal, editor: Editor) -> io::Result<()
             Event::Key(key) => {
                 // Routing: the focused layer gets the key first (modal layers
                 // swallow everything); the global keymap is the fallback.
-                if compositor.dispatch_key(key, &mut app) == KeyResult::Ignored
-                    && let Some(command) = keymap.lookup(&key)
+                if matches!(compositor.dispatch_key(key, &mut app), KeyResult::Ignored)
+                    && let Some(command) = app.registry.lookup_key(&key)
                 {
                     (command.execute)(&mut app, &mut compositor);
                 }

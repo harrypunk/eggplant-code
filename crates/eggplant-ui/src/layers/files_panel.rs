@@ -104,10 +104,6 @@ impl FilesPanel {
             return KeyResult::Consumed;
         }
 
-        if app.editor.is_modified() {
-            app.notifications
-                .push(Notification::warn("discarded unsaved changes"));
-        }
         match app.editor.open_buffer(&path) {
             Ok(()) => {
                 app.notifications.push(Notification::info(format!(
