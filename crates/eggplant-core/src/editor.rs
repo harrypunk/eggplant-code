@@ -1,4 +1,4 @@
-//! The editor facade: one document, one view, one cursor (for now).
+//! The editor facade: buffers of documents, one view, one cursor (for now).
 //!
 //! Wraps helix-view's `Document` + helix-core `Transaction`s behind a small,
 //! UI-agnostic API. The UI never touches helix types directly, so the backend
@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use arc_swap::ArcSwap;
 use helix_core::graphemes::{
     next_grapheme_boundary, nth_next_grapheme_boundary, nth_prev_grapheme_boundary,
@@ -44,17 +44,64 @@ impl Backend {
                 .context("failed to build tokio runtime")?,
         })
     }
+
+    fn open_document(&self, path: &Path) -> Result<Document> {
+        Document::open(
+            path,
+            None,
+            false,
+            self.config.clone(),
+            self.syn_loader.clone(),
+        )
+        .with_context(|| format!("failed to open {}", path.display()))
+    }
+
+    fn scratch_document(&self) -> Document {
+        Document::default(self.config.clone(), self.syn_loader.clone())
+    }
 }
 
-pub struct Editor {
+/// An open document plus its per-buffer state.
+struct Buffer {
     doc: Document,
-    view_id: ViewId,
-    mode: Mode,
     /// Edit transactions applied since the last save (our own modified flag,
     /// independent of helix internals so the facade stays backend-agnostic).
     edits_since_save: usize,
-    /// Bumped whenever the underlying document is replaced (open_file), so
-    /// the UI can drop per-document state (scroll offsets, ...).
+}
+
+impl Buffer {
+    fn new(doc: Document) -> Self {
+        Self {
+            doc,
+            edits_since_save: 0,
+        }
+    }
+
+    fn display_name(&self) -> String {
+        self.doc
+            .path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "[scratch]".to_owned())
+    }
+}
+
+/// Read-only buffer summary for UIs (statusline, `:ls`, pickers).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferInfo {
+    pub index: usize,
+    pub name: String,
+    pub modified: bool,
+    pub current: bool,
+}
+
+pub struct Editor {
+    buffers: Vec<Buffer>,
+    /// Index of the current buffer in `buffers`.
+    current: usize,
+    view_id: ViewId,
+    mode: Mode,
+    /// Bumped whenever the *identity* of the current document changes
+    /// (open/switch/close), so the UI can drop per-document state.
     generation: usize,
     backend: Backend,
 }
@@ -63,64 +110,134 @@ impl Editor {
     /// Open a file (or an empty document if it doesn't exist yet).
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let backend = Backend::new()?;
-        let doc = Document::open(
-            path.as_ref(),
-            None,
-            false,
-            backend.config.clone(),
-            backend.syn_loader.clone(),
-        )
-        .with_context(|| format!("failed to open {}", path.as_ref().display()))?;
-        Ok(Self::from_doc(doc, backend))
+        let doc = backend.open_document(path.as_ref())?;
+        Ok(Self::new(Buffer::new(doc), backend))
     }
 
     /// A new empty scratch document.
     pub fn scratch() -> Result<Self> {
         let backend = Backend::new()?;
-        let doc = Document::default(backend.config.clone(), backend.syn_loader.clone());
-        Ok(Self::from_doc(doc, backend))
+        let doc = backend.scratch_document();
+        Ok(Self::new(Buffer::new(doc), backend))
     }
 
-    /// Replace the current document with the file at `path`.
-    ///
-    /// NOTE: there are no buffers yet (M3+) — this discards the current
-    /// document. Callers should check `is_modified()` first.
-    pub fn open_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let doc = Document::open(
-            path.as_ref(),
-            None,
-            false,
-            self.backend.config.clone(),
-            self.backend.syn_loader.clone(),
-        )
-        .with_context(|| format!("failed to open {}", path.as_ref().display()))?;
-        self.set_doc(doc);
+    fn new(buffer: Buffer, backend: Backend) -> Self {
+        let view_id = ViewId::default();
+        let mut editor = Self {
+            buffers: vec![buffer],
+            current: 0,
+            view_id,
+            mode: Mode::Normal,
+            generation: 0,
+            backend,
+        };
+        editor.reset_cursor();
+        editor
+    }
+
+    fn reset_cursor(&mut self) {
+        let view_id = self.view_id;
+        self.doc_mut().set_selection(view_id, Selection::point(0));
+    }
+
+    fn doc(&self) -> &Document {
+        &self.buffers[self.current].doc
+    }
+
+    fn doc_mut(&mut self) -> &mut Document {
+        &mut self.buffers[self.current].doc
+    }
+
+    // ---- buffers ----
+
+    /// Open `path` into a buffer and switch to it. If the file is already
+    /// open, switches to its buffer instead of duplicating.
+    pub fn open_buffer(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        let path = path.as_ref();
+        if let Some(index) = self
+            .buffers
+            .iter()
+            .position(|b| b.doc.path() == Some(path))
+        {
+            self.switch_buffer(index)?;
+            return Ok(());
+        }
+        let doc = self.backend.open_document(path)?;
+        self.buffers.push(Buffer::new(doc));
+        self.current = self.buffers.len() - 1;
+        self.reset_cursor();
+        self.generation += 1;
         Ok(())
     }
 
-    fn set_doc(&mut self, doc: Document) {
-        self.doc = doc;
-        self.doc.set_selection(self.view_id, Selection::point(0));
-        self.edits_since_save = 0;
-        self.generation += 1;
+    pub fn switch_buffer(&mut self, index: usize) -> Result<()> {
+        if index >= self.buffers.len() {
+            bail!("no buffer {}", index + 1);
+        }
+        if index != self.current {
+            self.current = index;
+            self.reset_cursor();
+            self.generation += 1;
+        }
+        Ok(())
     }
 
-    /// Document replacement counter — the UI resets scroll etc. when it changes.
+    /// Close the current buffer. Refuses when it has unsaved changes unless
+    /// `force`. Closing the last buffer replaces it with a fresh scratch.
+    pub fn close_current_buffer(&mut self, force: bool) -> Result<()> {
+        if self.is_modified() && !force {
+            bail!("unsaved changes (use ! to discard)");
+        }
+        self.buffers.remove(self.current);
+        if self.buffers.is_empty() {
+            let doc = self.backend.scratch_document();
+            self.buffers.push(Buffer::new(doc));
+        }
+        self.current = self.current.min(self.buffers.len() - 1);
+        self.reset_cursor();
+        self.generation += 1;
+        Ok(())
+    }
+
+    pub fn next_buffer(&mut self) {
+        let next = (self.current + 1) % self.buffers.len();
+        let _ = self.switch_buffer(next);
+    }
+
+    pub fn prev_buffer(&mut self) {
+        let prev = (self.current + self.buffers.len() - 1) % self.buffers.len();
+        let _ = self.switch_buffer(prev);
+    }
+
+    pub fn buffers_info(&self) -> Vec<BufferInfo> {
+        self.buffers
+            .iter()
+            .enumerate()
+            .map(|(index, b)| BufferInfo {
+                index,
+                name: b.display_name(),
+                modified: b.edits_since_save > 0,
+                current: index == self.current,
+            })
+            .collect()
+    }
+
+    pub fn buffer_count(&self) -> usize {
+        self.buffers.len()
+    }
+
+    pub fn current_buffer(&self) -> usize {
+        self.current
+    }
+
+    /// True when any buffer has unsaved changes (used by quit guards).
+    pub fn any_modified(&self) -> bool {
+        self.buffers.iter().any(|b| b.edits_since_save > 0)
+    }
+
+    /// Document identity counter — the UI resets scroll etc. when it changes.
     pub fn generation(&self) -> usize {
         self.generation
-    }
-
-    fn from_doc(mut doc: Document, backend: Backend) -> Self {
-        let view_id = ViewId::default();
-        doc.set_selection(view_id, Selection::point(0));
-        Self {
-            doc,
-            view_id,
-            mode: Mode::Normal,
-            edits_since_save: 0,
-            generation: 0,
-            backend,
-        }
     }
 
     // ---- queries (read-only views for the UI) ----
@@ -129,21 +246,17 @@ impl Editor {
         self.mode
     }
 
-    pub fn path(&self) -> Option<&Path> {
-        self.doc.path()
-    }
-
     pub fn is_modified(&self) -> bool {
-        self.edits_since_save > 0
+        self.buffers[self.current].edits_since_save > 0
     }
 
     pub fn line_count(&self) -> usize {
-        self.doc.text().len_lines()
+        self.doc().text().len_lines()
     }
 
     /// The document's lines in `range` (clamped), with line endings stripped.
     pub fn lines(&self, range: std::ops::Range<usize>) -> Vec<String> {
-        let text = self.doc.text();
+        let text = self.doc().text();
         let end = range.end.min(self.line_count());
         (range.start.min(end)..end)
             .map(|i| {
@@ -155,22 +268,22 @@ impl Editor {
 
     /// Primary cursor as `(line, column)` in char units.
     pub fn cursor(&self) -> (usize, usize) {
-        let text = self.doc.text();
+        let text = self.doc().text();
         let pos = self.cursor_char_idx();
         let line = text.char_to_line(pos);
         (line, pos - text.line_to_char(line))
     }
 
     fn cursor_char_idx(&self) -> usize {
-        self.doc
+        self.doc()
             .selection(self.view_id)
             .primary()
-            .cursor(self.doc.text().slice(..))
+            .cursor(self.doc().text().slice(..))
     }
 
     /// Raw head of the primary range — the insert position in insert mode.
     fn selection_head(&self) -> usize {
-        self.doc.selection(self.view_id).primary().head
+        self.doc().selection(self.view_id).primary().head
     }
 
     /// Put the cursor at `pos`, respecting helix's block-cursor selection
@@ -180,14 +293,15 @@ impl Editor {
     /// - normal: forward `(pos, pos+1)`, block cursor sits at `pos`
     /// - insert: backward `(pos+1, pos)`, insert bar sits at `pos`
     fn set_cursor(&mut self, pos: usize) {
-        let len = self.doc.text().len_chars();
+        let view_id = self.view_id;
+        let len = self.doc().text().len_chars();
         let pos = pos.min(len);
         let range = match self.mode {
             Mode::Normal => Range::new(pos, (pos + 1).min(len)),
             Mode::Insert => Range::new((pos + 1).min(len), pos),
         };
-        self.doc
-            .set_selection(self.view_id, Selection::single(range.anchor, range.head));
+        self.doc_mut()
+            .set_selection(view_id, Selection::single(range.anchor, range.head));
     }
 
     // ---- mode ----
@@ -201,7 +315,7 @@ impl Editor {
 
     /// `a` — insert after the block cursor (append).
     pub fn enter_append(&mut self) {
-        let text = self.doc.text().slice(..);
+        let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         // After the grapheme under the cursor; on empty lines (cursor sits on
         // the line ending) the position itself is the insert point.
@@ -222,8 +336,8 @@ impl Editor {
             return;
         }
         let head = self.selection_head();
-        let line = self.doc.text().char_to_line(head);
-        let line_start = self.doc.text().line_to_char(line);
+        let line = self.doc().text().char_to_line(head);
+        let line_start = self.doc().text().line_to_char(line);
         let line_len = self.line_char_len(line);
         let col = head - line_start;
         let target = if line_len == 0 {
@@ -238,7 +352,7 @@ impl Editor {
     // ---- movements ----
 
     pub fn move_left(&mut self, count: usize) {
-        let text = self.doc.text().slice(..);
+        let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         let line_start = text.line_to_char(text.char_to_line(pos));
         // Clamp at line start: horizontal moves never cross line boundaries.
@@ -247,7 +361,7 @@ impl Editor {
     }
 
     pub fn move_right(&mut self, count: usize) {
-        let text = self.doc.text().slice(..);
+        let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         let new = nth_next_grapheme_boundary(text, pos, count);
         // Clamp at line end (mode-aware) via set_cursor_on_line.
@@ -275,7 +389,7 @@ impl Editor {
     /// Insert mode may rest one past the last char (the bar at end of line);
     /// normal mode stays on the last real char (unless the line is empty).
     fn set_cursor_on_line(&mut self, line: usize, col: usize) {
-        let text = self.doc.text().slice(..);
+        let text = self.doc().text().slice(..);
         let start = text.line_to_char(line);
         let len = self.line_char_len(line);
         let max_col = match self.mode {
@@ -287,7 +401,7 @@ impl Editor {
 
     /// Char length of a line's content, excluding the line ending (if any).
     fn line_char_len(&self, line: usize) -> usize {
-        let text = self.doc.text();
+        let text = self.doc().text();
         let start = text.line_to_char(line);
         let end = text.line_to_char(line + 1).max(start);
         let mut len = end.saturating_sub(start);
@@ -342,8 +456,8 @@ impl Editor {
         target: impl Fn(helix_core::RopeSlice, helix_core::selection::Range) -> usize,
         count: usize,
     ) {
-        let text = self.doc.text().slice(..);
-        let range = self.doc.selection(self.view_id).primary();
+        let text = self.doc().text().slice(..);
+        let range = self.doc().selection(self.view_id).primary();
         let new = motion(text, range, count);
         if new.head == range.head {
             return; // motion didn't move
@@ -354,8 +468,9 @@ impl Editor {
     // ---- edits ----
 
     fn apply(&mut self, transaction: Transaction) {
-        self.doc.apply(&transaction, self.view_id);
-        self.edits_since_save += 1;
+        let view_id = self.view_id;
+        self.doc_mut().apply(&transaction, view_id);
+        self.buffers[self.current].edits_since_save += 1;
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -363,13 +478,16 @@ impl Editor {
     }
 
     pub fn insert_str(&mut self, s: &str) {
-        let transaction =
-            Transaction::insert(self.doc.text(), self.doc.selection(self.view_id), s.into());
+        let transaction = Transaction::insert(
+            self.doc().text(),
+            self.doc().selection(self.view_id),
+            s.into(),
+        );
         self.apply(transaction);
     }
 
     pub fn insert_newline(&mut self) {
-        let le = self.doc.line_ending.as_str().to_owned();
+        let le = self.doc().line_ending.as_str().to_owned();
         self.insert_str(&le);
     }
 
@@ -387,33 +505,33 @@ impl Editor {
         let (line, _) = self.cursor();
         let target_line = line + offset;
         let insert_at = self
-            .doc
+            .doc()
             .text()
             .line_to_char(target_line)
-            .min(self.doc.text().len_chars());
-        let le = self.doc.line_ending.as_str().to_owned();
+            .min(self.doc().text().len_chars());
+        let le = self.doc().line_ending.as_str().to_owned();
         let transaction = Transaction::change(
-            self.doc.text(),
+            self.doc().text(),
             [(insert_at, insert_at, Some(le.into()))].into_iter(),
         );
         self.apply(transaction);
         // The new blank line starts where the line boundary landed after the edit.
         let start = self
-            .doc
+            .doc()
             .text()
             .line_to_char(target_line.min(self.line_count() - 1));
         self.set_cursor(start);
     }
 
     pub fn delete_backward(&mut self) {
-        let text = self.doc.text().slice(..);
+        let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         if pos == 0 {
             return;
         }
         let from = prev_grapheme_boundary(text, pos);
         self.apply(Transaction::delete(
-            self.doc.text(),
+            self.doc().text(),
             [(from, pos)].into_iter(),
         ));
     }
@@ -421,14 +539,14 @@ impl Editor {
     /// Delete the grapheme under the cursor (`x` in normal mode).
     /// Never deletes the line ending.
     pub fn delete_char_at_cursor(&mut self) {
-        let text = self.doc.text().slice(..);
+        let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         if text.get_char(pos).is_none_or(|c| c == '\n') {
             return;
         }
         let to = next_grapheme_boundary(text, pos);
         self.apply(Transaction::delete(
-            self.doc.text(),
+            self.doc().text(),
             [(pos, to)].into_iter(),
         ));
         self.clamp_cursor_off_line_ending();
@@ -448,7 +566,7 @@ impl Editor {
 
     pub fn save(&mut self) -> Result<()> {
         let future = self
-            .doc
+            .doc_mut()
             .save::<PathBuf>(None, false)
             .context("failed to start save")?;
         let event = self
@@ -456,16 +574,16 @@ impl Editor {
             .runtime
             .block_on(future)
             .context("save failed")?;
-        self.doc
+        self.doc_mut()
             .set_last_saved_revision(event.revision, event.save_time);
-        self.edits_since_save = 0;
+        self.buffers[self.current].edits_since_save = 0;
         Ok(())
     }
 
     // ---- introspection for status line ----
 
     pub fn display_name(&self) -> String {
-        self.doc
+        self.doc()
             .path()
             .and_then(|p| p.file_name())
             .map(|n| n.to_string_lossy().into_owned())
@@ -488,6 +606,12 @@ mod tests {
         ed.insert_str(content);
         ed.enter_normal();
         ed
+    }
+
+    fn temp_file(name: &str, content: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("eggplant-{name}-{}", std::process::id()));
+        std::fs::write(&path, content).unwrap();
+        path
     }
 
     #[test]
@@ -581,37 +705,12 @@ mod tests {
     fn line_end_on_final_line_without_newline() {
         // Regression: line_char_len must not eat the last char when the
         // final line has no trailing newline.
-        let path = std::env::temp_dir().join(format!("eggplant-nonl-{}", std::process::id()));
-        std::fs::write(&path, "ab\ncde").unwrap();
+        let path = temp_file("nonl", "ab\ncde");
         let mut ed = Editor::open(&path).unwrap();
         ed.move_last_line();
         ed.move_line_end();
         assert_eq!(ed.cursor(), (1, 2)); // on 'e', not 'd'
         std::fs::remove_file(&path).unwrap();
-    }
-
-    #[test]
-    fn open_file_replaces_document() {
-        let dir = std::env::temp_dir();
-        let path_a = dir.join(format!("eggplant-a-{}", std::process::id()));
-        let path_b = dir.join(format!("eggplant-b-{}", std::process::id()));
-        std::fs::write(&path_a, "aaa").unwrap();
-        std::fs::write(&path_b, "bbb\nccc").unwrap();
-
-        let mut ed = Editor::open(&path_a).unwrap();
-        let generation = ed.generation();
-        ed.enter_insert();
-        ed.insert_str("dirty");
-        assert!(ed.is_modified());
-
-        ed.open_file(&path_b).unwrap();
-        assert_eq!(text_of(&ed), "bbb\nccc");
-        assert!(!ed.is_modified());
-        assert!(ed.generation() > generation);
-        assert_eq!(ed.cursor(), (0, 0));
-
-        std::fs::remove_file(&path_a).unwrap();
-        std::fs::remove_file(&path_b).unwrap();
     }
 
     #[test]
@@ -628,5 +727,80 @@ mod tests {
         }
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "saved content\n");
         std::fs::remove_file(&path).unwrap();
+    }
+
+    // ---- buffers ----
+
+    #[test]
+    fn open_buffer_adds_and_switches() {
+        let path_a = temp_file("buf-a", "aaa");
+        let path_b = temp_file("buf-b", "bbb");
+        let mut ed = Editor::open(&path_a).unwrap();
+        assert_eq!(ed.buffer_count(), 1);
+
+        ed.open_buffer(&path_b).unwrap();
+        assert_eq!(ed.buffer_count(), 2);
+        assert_eq!(ed.current_buffer(), 1);
+        assert_eq!(text_of(&ed), "bbb");
+
+        // Reopening the same path switches instead of duplicating.
+        ed.open_buffer(&path_a).unwrap();
+        assert_eq!(ed.buffer_count(), 2);
+        assert_eq!(ed.current_buffer(), 0);
+
+        std::fs::remove_file(&path_a).unwrap();
+        std::fs::remove_file(&path_b).unwrap();
+    }
+
+    #[test]
+    fn modified_flag_is_per_buffer() {
+        let path_a = temp_file("mod-a", "aaa");
+        let path_b = temp_file("mod-b", "bbb");
+        let mut ed = Editor::open(&path_a).unwrap();
+        ed.open_buffer(&path_b).unwrap();
+
+        ed.enter_insert();
+        ed.insert_str("dirty");
+        assert!(ed.is_modified());
+        assert!(ed.any_modified());
+
+        ed.switch_buffer(0).unwrap();
+        assert!(!ed.is_modified());
+        assert!(ed.any_modified()); // buffer B is still dirty
+
+        std::fs::remove_file(&path_a).unwrap();
+        std::fs::remove_file(&path_b).unwrap();
+    }
+
+    #[test]
+    fn close_buffer_guards_unsaved_and_keeps_scratch() {
+        let mut ed = Editor::scratch().unwrap();
+        ed.enter_insert();
+        ed.insert_str("dirty");
+        ed.enter_normal();
+
+        // Refuses with unsaved changes.
+        assert!(ed.close_current_buffer(false).is_err());
+        // Force closes; last buffer becomes a fresh scratch.
+        ed.close_current_buffer(true).unwrap();
+        assert_eq!(ed.buffer_count(), 1);
+        assert!(!ed.is_modified());
+        assert_eq!(text_of(&ed), "\n");
+    }
+
+    #[test]
+    fn next_prev_buffer_wraps() {
+        let path_a = temp_file("wrap-a", "a");
+        let path_b = temp_file("wrap-b", "b");
+        let mut ed = Editor::open(&path_a).unwrap();
+        ed.open_buffer(&path_b).unwrap();
+
+        ed.next_buffer();
+        assert_eq!(ed.current_buffer(), 0);
+        ed.prev_buffer();
+        assert_eq!(ed.current_buffer(), 1);
+
+        std::fs::remove_file(&path_a).unwrap();
+        std::fs::remove_file(&path_b).unwrap();
     }
 }

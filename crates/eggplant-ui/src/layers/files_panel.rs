@@ -108,7 +108,7 @@ impl FilesPanel {
             app.notifications
                 .push(Notification::warn("discarded unsaved changes"));
         }
-        match app.editor.open_file(&path) {
+        match app.editor.open_buffer(&path) {
             Ok(()) => {
                 app.notifications.push(Notification::info(format!(
                     "opened {}",
