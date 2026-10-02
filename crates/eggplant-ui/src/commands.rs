@@ -120,7 +120,7 @@ pub fn global_keymap() -> Keymap {
 // ---- command implementations ----
 
 fn force_quit(app: &mut App, _: &mut Compositor) {
-    app.should_quit = true;
+    app.request_quit();
 }
 
 fn quit(app: &mut App, compositor: &mut Compositor) {
@@ -128,10 +128,10 @@ fn quit(app: &mut App, compositor: &mut Compositor) {
         compositor.push(Box::new(ConfirmDialog::new(
             "unsaved changes",
             "Quit without saving?",
-            |app: &mut App| app.should_quit = true,
+            |app: &mut App| app.request_quit(),
         )));
     } else {
-        app.should_quit = true;
+        app.request_quit();
     }
 }
 

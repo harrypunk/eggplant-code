@@ -74,7 +74,7 @@ fn event_loop(terminal: &mut CrosstermTerminal, editor: Editor) -> io::Result<()
                 {
                     (command.execute)(&mut app, &mut compositor);
                 }
-                if app.should_quit {
+                if app.is_quitting() {
                     break;
                 }
             }
