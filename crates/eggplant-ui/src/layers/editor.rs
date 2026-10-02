@@ -4,8 +4,6 @@
 //! Keys are data-driven: `NORMAL_KEYMAP` / `INSERT_KEYMAP` map key strokes to
 //! editor commands. Normal mode supports count prefixes (`5j`, `12G`-style).
 
-use std::cell::Cell;
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use eggplant_core::Mode;
 use ratatui::Frame;
@@ -199,8 +197,9 @@ pub struct EditorSurface {
     seen_generation: usize,
     /// Accumulated count prefix in normal mode (`5j` → 5).
     count: Option<usize>,
-    /// Last rendered editor height, so key handling can keep the cursor visible.
-    viewport_height: Cell<usize>,
+    /// Editor height from the compositor's `resize` hook, so key handling can
+    /// keep the cursor visible. Updated outside `render` (Rule 5).
+    viewport_height: usize,
 }
 
 impl EditorSurface {
@@ -215,7 +214,7 @@ impl EditorSurface {
             self.scroll = 0;
         }
         let cursor_line = app.editor.cursor().0;
-        let height = self.viewport_height.get().max(1);
+        let height = self.viewport_height.max(1);
         if cursor_line < self.scroll {
             self.scroll = cursor_line;
         } else if cursor_line >= self.scroll + height {
@@ -298,8 +297,12 @@ impl EditorSurface {
 
 impl Layer for EditorSurface {
     fn render(&self, frame: &mut Frame, area: Rect, app: &App, _focused: bool) {
-        self.viewport_height.set(area.height as usize);
         self.render_text_area(frame, area, app);
+    }
+
+    fn resize(&mut self, area: Rect, app: &App) {
+        self.viewport_height = area.height as usize;
+        self.ensure_cursor_visible(app);
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {

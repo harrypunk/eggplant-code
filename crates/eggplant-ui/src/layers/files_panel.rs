@@ -4,7 +4,6 @@
 //! `Backspace`/`h` goes to the parent directory, `Esc` returns focus to the
 //! editor. The panel stays open until toggled off.
 
-use std::cell::Cell;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,7 +34,9 @@ pub struct FilesPanel {
     /// First visible row (scroll offset within the list).
     offset: usize,
     /// Last rendered inner height, for scroll bookkeeping in key handling.
-    inner_height: Cell<usize>,
+    /// Inner list height from the compositor's `resize` hook; used to keep the
+    /// selection visible. Updated outside `render` (Rule 5).
+    inner_height: usize,
 }
 
 impl FilesPanel {
@@ -62,7 +63,7 @@ impl FilesPanel {
             entries,
             selected: 0,
             offset: 0,
-            inner_height: Cell::new(1),
+            inner_height: 1,
         })
     }
 
@@ -81,7 +82,12 @@ impl FilesPanel {
         }
         let last = self.entries.len() - 1;
         self.selected = self.selected.saturating_add_signed(delta).min(last);
-        let height = self.inner_height.get().max(1);
+        self.ensure_selection_visible();
+    }
+
+    /// Scroll the window so the selected entry stays visible.
+    fn ensure_selection_visible(&mut self) {
+        let height = self.inner_height.max(1);
         if self.selected < self.offset {
             self.offset = self.selected;
         } else if self.selected >= self.offset + height {
@@ -134,7 +140,6 @@ impl Layer for FilesPanel {
             .border_style(border_style)
             .title(format!(" {} ", self.dir.display()));
         let inner = block.inner(area);
-        self.inner_height.set(inner.height as usize);
         frame.render_widget(block, area);
 
         let rows: Vec<Line> = self
@@ -184,6 +189,12 @@ impl Layer for FilesPanel {
             }
             _ => KeyResult::Ignored,
         }
+    }
+
+    fn resize(&mut self, area: Rect, _app: &App) {
+        let inner = Block::default().borders(Borders::ALL).inner(area);
+        self.inner_height = inner.height as usize;
+        self.ensure_selection_visible();
     }
 
     fn kind(&self) -> LayerKind {

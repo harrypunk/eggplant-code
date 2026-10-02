@@ -11,6 +11,7 @@ use crossterm::terminal::{
 use eggplant_core::Editor;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 
 use crate::app::App;
 use crate::compositor::{Compositor, KeyResult};
@@ -50,8 +51,12 @@ fn event_loop(terminal: &mut CrosstermTerminal, editor: Editor) -> io::Result<()
         .push(Notification::info("welcome to eggplant-code"));
 
     loop {
+        // Pre-render lifecycle: layers update viewport-dependent state from
+        // their resolved area, then render stays a pure function of state.
+        let size = terminal.size()?;
+        let area = Rect::new(0, 0, size.width, size.height);
+        compositor.resize(area, &app);
         terminal.draw(|frame| {
-            let area = frame.area();
             compositor.render(frame, area, &app);
             app.notifications.render(frame, area);
         })?;

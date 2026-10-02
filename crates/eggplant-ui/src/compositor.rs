@@ -64,6 +64,11 @@ pub trait Layer {
         KeyResult::Ignored
     }
 
+    /// Lifecycle hook called by the compositor each frame, before rendering,
+    /// with the layer's resolved area. Update viewport-dependent state here
+    /// (scroll windows, page sizes) — `render` itself must stay pure (Rule 5).
+    fn resize(&mut self, _area: Rect, _app: &App) {}
+
     /// How this layer participates in layout.
     fn kind(&self) -> LayerKind;
 
@@ -243,7 +248,18 @@ impl Compositor {
         }
     }
 
-    /// Render all layers bottom-up, then the statusline chrome.
+    /// Pre-render lifecycle: give every layer its resolved area so it can
+    /// update viewport-dependent state outside of `render` (Rule 5).
+    pub fn resize(&mut self, area: Rect, app: &App) {
+        let kinds: Vec<LayerKind> = self.layers.iter().map(|layer| layer.kind()).collect();
+        let solution = compute_layout(&kinds, area);
+        for (layer, area) in self.layers.iter_mut().zip(solution.layer_areas) {
+            layer.resize(area, app);
+        }
+    }
+
+    /// Render all layers bottom-up, then the statusline chrome. Pure: state
+    /// updates belong in `resize` / `handle_key` (Rule 5).
     pub fn render(&self, frame: &mut Frame, area: Rect, app: &App) {
         let kinds: Vec<LayerKind> = self.layers.iter().map(|layer| layer.kind()).collect();
         let solution = compute_layout(&kinds, area);
