@@ -257,7 +257,7 @@ impl EditorSurface {
 }
 
 impl Layer for EditorSurface {
-    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element<'_> {
+    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         editor::view(
             &EditorProps {
                 lines: app

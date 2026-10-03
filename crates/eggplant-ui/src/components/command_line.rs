@@ -6,7 +6,7 @@ use ratatui::text::{Line, Span};
 
 use crate::element::Element;
 
-pub fn view(input: &str, area: Rect) -> Element<'static> {
+pub fn view(input: &str, area: Rect) -> Element {
     // One line at the very bottom of the body area.
     let line_area = Rect {
         height: 1,

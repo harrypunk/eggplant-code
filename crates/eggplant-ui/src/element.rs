@@ -13,15 +13,16 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
 /// A declarative UI description: *what* to draw, not *how*.
 ///
-/// Built by components, consumed once by [`paint`]. Ratatui's `Line`/`Span`/
-/// `Style`/`Constraint`/`Rect` are already plain data and are reused as the
-/// tree's vocabulary.
-pub enum Element<'a> {
+/// Built by components, consumed once by [`paint`]. The tree is fully owning
+/// (`Line<'static>`), so no lifetime parameters leak into component or layer
+/// signatures; components clone the few short strings they display. Ratatui's
+/// `Line`/`Span`/`Style`/`Constraint`/`Rect` are reused as the vocabulary.
+pub enum Element {
     /// Nothing to draw.
     Empty,
     /// Text lines (ratatui `Paragraph` equivalent).
     Text {
-        lines: Vec<Line<'a>>,
+        lines: Vec<Line<'static>>,
         style: Style,
         wrap: bool,
     },
@@ -29,28 +30,28 @@ pub enum Element<'a> {
     Layout {
         direction: Direction,
         constraints: Vec<Constraint>,
-        children: Vec<Element<'a>>,
+        children: Vec<Element>,
     },
     /// Border/title chrome around a child.
     Bordered {
-        title: Option<Line<'a>>,
+        title: Option<Line<'static>>,
         border_style: Style,
         style: Style,
-        child: Box<Element<'a>>,
+        child: Box<Element>,
     },
     /// Opaque background, then the child (floats, panels, toasts).
-    Cleared(Box<Element<'a>>),
+    Cleared(Box<Element>),
     /// Paint the child at an absolute rect (clamped to the parent area).
-    Fixed { area: Rect, child: Box<Element<'a>> },
+    Fixed { area: Rect, child: Box<Element> },
     /// Paint children into the same area, in order (bottom-up).
-    Stack(Vec<Element<'a>>),
+    Stack(Vec<Element>),
     /// Place the terminal cursor (absolute position; last one painted wins).
     Cursor(Position),
 }
 
-impl<'a> Element<'a> {
+impl Element {
     /// Plain text lines.
-    pub fn text(lines: Vec<Line<'a>>) -> Self {
+    pub fn text(lines: Vec<Line<'static>>) -> Self {
         Element::Text {
             lines,
             style: Style::default(),
@@ -59,7 +60,7 @@ impl<'a> Element<'a> {
     }
 
     /// Paint `child` at an absolute rect.
-    pub fn fixed(area: Rect, child: Element<'a>) -> Self {
+    pub fn fixed(area: Rect, child: Element) -> Self {
         Element::Fixed {
             area,
             child: Box::new(child),
@@ -67,12 +68,12 @@ impl<'a> Element<'a> {
     }
 
     /// Opaque background, then `child`.
-    pub fn cleared(child: Element<'a>) -> Self {
+    pub fn cleared(child: Element) -> Self {
         Element::Cleared(Box::new(child))
     }
 
     /// Border/title chrome around `child`.
-    pub fn bordered(title: impl Into<Line<'a>>, border_style: Style, child: Element<'a>) -> Self {
+    pub fn bordered(title: impl Into<Line<'static>>, border_style: Style, child: Element) -> Self {
         Element::Bordered {
             title: Some(title.into()),
             border_style,
@@ -152,7 +153,6 @@ mod tests {
     use super::*;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
-    use ratatui::buffer::Buffer;
     use ratatui::style::{Color, Style};
     use ratatui::text::Span;
 

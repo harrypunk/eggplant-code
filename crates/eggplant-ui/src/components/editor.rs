@@ -18,7 +18,7 @@ pub struct EditorProps {
     pub cursor: (usize, usize),
 }
 
-pub fn view(props: &EditorProps, area: Rect) -> Element<'static> {
+pub fn view(props: &EditorProps, area: Rect) -> Element {
     let gutter_width = props.line_count.max(1).ilog10() as u16 + 2;
     let (cursor_line, cursor_col) = props.cursor;
 

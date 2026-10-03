@@ -47,7 +47,7 @@ impl Palette {
 }
 
 impl Layer for Palette {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
         let items = self
             .filtered()
             .iter()
@@ -58,7 +58,7 @@ impl Layer for Palette {
             .collect();
         palette::view(
             &PaletteProps {
-                input: &self.input,
+                input: self.input.clone(),
                 items,
                 selected: self.selected,
             },

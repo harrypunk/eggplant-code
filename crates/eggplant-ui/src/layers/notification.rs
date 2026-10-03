@@ -68,13 +68,13 @@ impl Notifications {
     }
 
     /// Project visible notifications into the pure toast component.
-    pub fn view(&self, area: Rect) -> Element<'_> {
+    pub fn view(&self, area: Rect) -> Element {
         let toasts: Vec<ToastProps> = self
             .items
             .iter()
             .filter(|n| n.is_visible())
             .map(|n| ToastProps {
-                message: n.message.as_str(),
+                message: n.message.clone(),
                 level: n.level,
             })
             .collect();

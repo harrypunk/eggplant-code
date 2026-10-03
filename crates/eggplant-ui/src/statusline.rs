@@ -9,12 +9,11 @@ use crate::element::Element;
 
 /// Describe the statusline. `focused_layer` is the focused layer's id, shown
 /// as a tag when it isn't the base editor.
-pub fn view(app: &App, focused_layer: Option<&'static str>, area: Rect) -> Element<'static> {
-    let buffer_name = app.editor.display_name();
+pub fn view(app: &App, focused_layer: Option<&'static str>, area: Rect) -> Element {
     statusline::view(
         &StatuslineProps {
             mode: app.editor.mode(),
-            buffer_name: &buffer_name,
+            buffer_name: app.editor.display_name(),
             modified: app.editor.is_modified(),
             buffers: (app.editor.current_buffer(), app.editor.buffer_count()),
             cursor: app.editor.cursor(),

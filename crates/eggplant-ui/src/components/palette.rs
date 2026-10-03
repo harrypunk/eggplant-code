@@ -13,8 +13,8 @@ pub struct PaletteItem {
 }
 
 /// Everything the palette needs — nothing more.
-pub struct PaletteProps<'a> {
-    pub input: &'a str,
+pub struct PaletteProps {
+    pub input: String,
     pub items: Vec<PaletteItem>,
     pub selected: usize,
 }
@@ -22,7 +22,7 @@ pub struct PaletteProps<'a> {
 /// Display cap; the container pre-filters, this caps the rendered rows.
 pub const MAX_ROWS: u16 = 8;
 
-pub fn view(props: &PaletteProps, area: Rect) -> Element<'static> {
+pub fn view(props: &PaletteProps, area: Rect) -> Element {
     // Centered horizontally, hugging the top of the body area.
     let width = (area.width * 3 / 5).max(30).min(area.width);
     let height = (MAX_ROWS + 3).min(area.height); // input + rows + borders

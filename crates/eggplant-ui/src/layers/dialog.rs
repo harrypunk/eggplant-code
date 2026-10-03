@@ -24,7 +24,7 @@ impl Dialog {
 }
 
 impl Layer for Dialog {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
         dialog::dialog_view(&self.title, &self.body, area)
     }
 
@@ -71,7 +71,7 @@ impl ConfirmDialog {
 }
 
 impl Layer for ConfirmDialog {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
         dialog::confirm_view(&self.title, &self.message, area)
     }
 

@@ -24,7 +24,7 @@ impl CommandLine {
 }
 
 impl Layer for CommandLine {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element<'_> {
+    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
         command_line::view(&self.input, area)
     }
 

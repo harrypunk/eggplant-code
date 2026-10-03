@@ -24,7 +24,7 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 }
 
 /// An opaque, centered floating box with a title.
-fn float_box<'a>(title: &'a str, lines: Vec<Line<'a>>, area: Rect) -> Element<'a> {
+fn float_box(title: &str, lines: Vec<Line<'static>>, area: Rect) -> Element {
     Element::fixed(
         centered(area, 50, 30),
         Element::cleared(Element::Bordered {
@@ -41,12 +41,16 @@ fn float_box<'a>(title: &'a str, lines: Vec<Line<'a>>, area: Rect) -> Element<'a
 }
 
 /// Simple message dialog body.
-pub fn dialog_view<'a>(title: &'a str, body: &'a str, area: Rect) -> Element<'a> {
-    float_box(title, body.lines().map(Line::from).collect(), area)
+pub fn dialog_view(title: &str, body: &str, area: Rect) -> Element {
+    float_box(
+        title,
+        body.lines().map(|l| Line::from(l.to_owned())).collect(),
+        area,
+    )
 }
 
 /// Yes/no confirm dialog body (`message` + key hints).
-pub fn confirm_view<'a>(title: &'a str, message: &str, area: Rect) -> Element<'a> {
+pub fn confirm_view(title: &str, message: &str, area: Rect) -> Element {
     let body = format!("{message}\n\n[y] yes   [n] no");
     float_box(
         title,

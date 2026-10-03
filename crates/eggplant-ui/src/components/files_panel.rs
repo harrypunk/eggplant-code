@@ -24,7 +24,7 @@ pub struct FilesPanelProps {
     pub focused: bool,
 }
 
-pub fn view(props: &FilesPanelProps, _area: Rect) -> Element<'static> {
+pub fn view(props: &FilesPanelProps, _area: Rect) -> Element {
     let border_style = if props.focused {
         Style::default().fg(Color::Cyan)
     } else {

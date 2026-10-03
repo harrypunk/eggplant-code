@@ -14,8 +14,8 @@ const MARGIN: u16 = 1;
 const MAX_VISIBLE: usize = 5;
 
 /// One toast, projected for display.
-pub struct ToastProps<'a> {
-    pub message: &'a str,
+pub struct ToastProps {
+    pub message: String,
     pub level: Level,
 }
 
@@ -28,7 +28,7 @@ fn border_style(level: Level) -> Style {
     Style::default().fg(color).add_modifier(Modifier::BOLD)
 }
 
-pub fn view<'a>(toasts: &[ToastProps<'a>], area: Rect) -> Element<'a> {
+pub fn view(toasts: &[ToastProps], area: Rect) -> Element {
     let hidden = toasts.len().saturating_sub(MAX_VISIBLE);
     let mut children: Vec<Element> = Vec::new();
 
@@ -68,7 +68,7 @@ pub fn view<'a>(toasts: &[ToastProps<'a>], area: Rect) -> Element<'a> {
                     title: None,
                     border_style: border_style(toast.level),
                     style: Style::default().bg(Color::Black),
-                    child: Box::new(Element::text(vec![Line::from(toast.message)])),
+                    child: Box::new(Element::text(vec![Line::from(toast.message.clone())])),
                 }),
             )
         });

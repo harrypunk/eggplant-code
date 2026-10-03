@@ -62,7 +62,7 @@ pub enum LayerKind {
 pub trait Layer {
     /// Describe this layer's UI as an element tree. Pure: no mutation, no
     /// painting — the compositor paints the returned tree (Rule 5).
-    fn view(&self, area: Rect, app: &App, focused: bool) -> Element<'_>;
+    fn view(&self, area: Rect, app: &App, focused: bool) -> Element;
 
     /// Handle a key.
     fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {

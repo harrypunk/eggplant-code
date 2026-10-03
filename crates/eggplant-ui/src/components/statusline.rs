@@ -8,9 +8,9 @@ use ratatui::text::{Line, Span};
 use crate::element::Element;
 
 /// Everything the statusline needs — nothing more.
-pub struct StatuslineProps<'a> {
+pub struct StatuslineProps {
     pub mode: Mode,
-    pub buffer_name: &'a str,
+    pub buffer_name: String,
     pub modified: bool,
     /// (current index, total) for the buffer indicator.
     pub buffers: (usize, usize),
@@ -18,10 +18,10 @@ pub struct StatuslineProps<'a> {
     pub cursor: (usize, usize),
     pub line_count: usize,
     /// Focused layer id, shown as a tag when it isn't the base editor.
-    pub focused_layer: Option<&'a str>,
+    pub focused_layer: Option<&'static str>,
 }
 
-pub fn view(props: &StatuslineProps, area: Rect) -> Element<'static> {
+pub fn view(props: &StatuslineProps, area: Rect) -> Element {
     let mode_bg = match props.mode {
         Mode::Normal => Color::Cyan,
         Mode::Insert => Color::Green,
