@@ -15,4 +15,6 @@ pub mod ex_commands;
 pub mod fuzzy;
 pub mod layers;
 pub mod runner;
+pub mod startup;
 pub mod statusline;
+pub mod terminal;
