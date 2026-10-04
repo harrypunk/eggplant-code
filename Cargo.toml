@@ -12,11 +12,13 @@ eggplant-ui = { path = "crates/eggplant-ui" }
 eggplant-core = { path = "crates/eggplant-core" }
 eggplant-agent = { path = "crates/eggplant-agent" }
 
-# External deps (forks live on LAN gitea; see PLAN.md)
-ratatui = { git = "http://git.z.lan/fork/rataui" }
+# External deps
+ratatui = "0.30.2"
 crossterm = "0.29"
-helix-core = { git = "http://git.z.lan/fork/helix" }
-helix-view = { git = "http://git.z.lan/fork/helix" }
+# helix doesn't publish library crates (crates.io has only a 0.0.0 stub), so
+# git deps are required — pinned to a rev on the LAN mirror for reproducibility.
+helix-core = { git = "http://git.z.lan/fork/helix", rev = "079a789e8cb08ead67f19e1971a1b7438b37354b" }
+helix-view = { git = "http://git.z.lan/fork/helix", rev = "079a789e8cb08ead67f19e1971a1b7438b37354b" }
 
 # Third-party
 arc-swap = "1"

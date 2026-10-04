@@ -312,15 +312,16 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "compact_str"
-version = "0.10.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79fcda08c33bb58b97008b2cdada6622500e949e060f5913361763121abd2416"
+checksum = "9dfdd1c2274d9aa354115b09dc9a901d6c5576818cdf70d14cae2bdb47df00ab"
 dependencies = [
  "castaway",
  "cfg-if",
  "itoa",
+ "rustversion",
+ "ryu",
  "static_assertions",
- "zmij",
 ]
 
 [[package]]
@@ -857,7 +858,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 [[package]]
 name = "helix-core"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -893,7 +894,7 @@ dependencies = [
 [[package]]
 name = "helix-dap"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "futures-executor",
@@ -914,7 +915,7 @@ dependencies = [
 [[package]]
 name = "helix-dap-types"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "serde",
  "serde_json",
@@ -923,7 +924,7 @@ dependencies = [
 [[package]]
 name = "helix-event"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "foldhash 0.2.0",
@@ -938,7 +939,7 @@ dependencies = [
 [[package]]
 name = "helix-loader"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "cc",
@@ -959,7 +960,7 @@ dependencies = [
 [[package]]
 name = "helix-lsp"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -984,7 +985,7 @@ dependencies = [
 [[package]]
 name = "helix-lsp-types"
 version = "0.95.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "bitflags 2.13.2",
  "helix-stdx",
@@ -995,12 +996,12 @@ dependencies = [
 [[package]]
 name = "helix-parsec"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 
 [[package]]
 name = "helix-stdx"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "bitflags 2.13.2",
  "dunce",
@@ -1020,7 +1021,7 @@ dependencies = [
 [[package]]
 name = "helix-vcs"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1035,7 +1036,7 @@ dependencies = [
 [[package]]
 name = "helix-view"
 version = "25.7.1"
-source = "git+http://git.z.lan/fork/helix#079a789e8cb08ead67f19e1971a1b7438b37354b"
+source = "git+http://git.z.lan/fork/helix?rev=079a789e8cb08ead67f19e1971a1b7438b37354b#079a789e8cb08ead67f19e1971a1b7438b37354b"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -1231,9 +1232,9 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "itertools"
-version = "0.15.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
 dependencies = [
  "either",
 ]
@@ -1819,7 +1820,8 @@ checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 [[package]]
 name = "ratatui"
 version = "0.30.2"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3274ba0a2c5e1bcad2a2005d20f4dc59dad26b2eb0940fb094500dba4099d57d"
 dependencies = [
  "instability",
  "ratatui-core",
@@ -1834,7 +1836,8 @@ dependencies = [
 [[package]]
 name = "ratatui-core"
 version = "0.1.2"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbb175c433c8e28a809d1f5773a2ae96e68c0ce40db865cbab1020bf33ae479c"
 dependencies = [
  "bitflags 2.13.2",
  "compact_str",
@@ -1855,7 +1858,8 @@ dependencies = [
 [[package]]
 name = "ratatui-crossterm"
 version = "0.1.2"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "567584a3b0e6a8203c23de40b4861497266725eb5363dbfd18a1edd603cca9f0"
 dependencies = [
  "cfg-if",
  "crossterm",
@@ -1866,7 +1870,8 @@ dependencies = [
 [[package]]
 name = "ratatui-macros"
 version = "0.7.2"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed7dc68daa7498a43e4d68e0eb078427e10c38fbcfbb1e42d955f1fa2140d814"
 dependencies = [
  "ratatui-core",
  "ratatui-widgets",
@@ -1875,7 +1880,8 @@ dependencies = [
 [[package]]
 name = "ratatui-termina"
 version = "0.1.0"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0bf912d9e66f057a759d92e386a280ea886b352ab757d6ac4d653c7ed2c43c2"
 dependencies = [
  "instability",
  "ratatui-core",
@@ -1885,7 +1891,8 @@ dependencies = [
 [[package]]
 name = "ratatui-termwiz"
 version = "0.1.2"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faf03e0380b7744054d6cb74224fe3adf062a029754933f575ca1e3b4c2ce977"
 dependencies = [
  "ratatui-core",
  "termwiz",
@@ -1894,7 +1901,8 @@ dependencies = [
 [[package]]
 name = "ratatui-widgets"
 version = "0.3.2"
-source = "git+http://git.z.lan/fork/rataui#7023d4f2ce07577f7f7cafece0be5c4a3d080608"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66e3d19bcc9130ca376277d93b60767ff121ace3be06f5f95f81dd68956407d1"
 dependencies = [
  "bitflags 2.13.2",
  "hashbrown 0.17.1",
@@ -2073,6 +2081,12 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "scopeguard"
@@ -2400,9 +2414,9 @@ dependencies = [
 
 [[package]]
 name = "termina"
-version = "0.4.0"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "881a7f20ade48167027822c52a0aeca879afa3174b15c71997827826bce669f9"
+checksum = "9048a889effe34a5cddee0af7f53285198b16dca3be510858d38dfdb3e62a04e"
 dependencies = [
  "bitflags 2.13.2",
  "parking_lot",
@@ -2712,9 +2726,9 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-truncate"
-version = "3.0.0"
+version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5dde200aa133f5b6d9cc616878815ffaa45ad9529ef4a2f04d86bab91d63984"
+checksum = "16b380a1238663e5f8a691f9039c73e1cdae598a30e9855f541d29b08b53e9a5"
 dependencies = [
  "itertools",
  "unicode-segmentation",
