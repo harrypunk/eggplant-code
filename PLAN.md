@@ -23,7 +23,8 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 4. **Helix core first, own core maybe later** — v1 builds on `helix-core` / `helix-view` /
    `helix-loader` (+ `helix-lsp`, `helix-dap`, `helix-vcs` as needed). Design behind our own
    traits/facade so the backend can be swapped later.
-5. **AI-native, Rust-native agent** — not a full IDE, but AI as a first-class citizen. After
+5. **AI-native, Rust-native agent** — **ON HOLD** (see milestones; editor UI/UX comes first).
+   Not a full IDE, but AI as a first-class citizen. After
    surveying existing agents, we will build a **native Rust agent** adopting the **minimal
    design philosophy of pi** (not a 100% copy): small core, provider abstraction, tool
    calling, streaming. No opencode/pi subprocess or server dependency.
@@ -61,7 +62,7 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 
 ## Open Questions (detail sessions)
 
-1. **Native Rust agent design** (top priority, later milestone):
+1. **Native Rust agent design** (ON HOLD with M4 — revisit at M9):
    - adopt pi's minimal architecture: small agent loop, provider abstraction (LLM APIs),
      tool-use schema, streaming events into editor surfaces.
    - what tools does the agent get (read/edit buffer, shell, LSP)?
@@ -96,13 +97,21 @@ A custom, AI-native terminal editor with an opinionated UI layout.
       `:` command line → ex_commands table (w/q/wq/q!/e/b/bd/bn/bp/ls); palette on `Space`
       with own fuzzy matcher; editor mode keymaps as data tables + count prefixes (`5j`,`nG`);
       buffers: open/switch/next/prev/close in facade)
-- [ ] **M4 — AI v1 (native agent)**: minimal Rust agent loop (pi-inspired): provider
-      abstraction + streaming chat into a toggleable panel; grows into agentic edits later.
+- [ ] **M4 — AI v1 (native agent)** — **ON HOLD**: editor UI/UX milestones come first;
+      resume when the editing experience is solid. Minimal Rust agent loop (pi-inspired):
+      provider abstraction + streaming chat into a toggleable panel; agentic edits later.
 - [ ] **M5 — Syntax highlighting**: tree-sitter via helix-core; highlight styles read the
       theme's semantic slots (theme system landed first for this reason — `theme.rs`,
-      built-ins tokyo-night/classic, `:theme <name>`; custom theme files à la ghostty in M7).
-- [ ] **M6 — LSP / AI v2**: LSP features; agentic edits w/ diff review.
-- [ ] **M7+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
+      built-ins tokyo-night/classic, `:theme <name>`).
+- [ ] **M6 — Editing UX**: undo/redo (`u`/`U`), delete/yank/paste with textobjects
+      (`dw`, `yy`, `p`), visual mode (`v`), key sequences (`gg`, `ge` — needs pending-key
+      infra), search (`/`), horizontal scroll or soft-wrap (long lines are unreachable today).
+- [ ] **M7 — Chrome UX**: buffer picker (`Space b`), custom theme files (ghostty-style
+      `~/.config/eggplant/themes/*.toml`), per-buffer view memory (cursor+scroll survive
+      buffer switches), pending-key/count display in statusline, mouse support.
+- [ ] **M8 — LSP**: diagnostics/goto/completion via helix-lsp (reused, behind the facade).
+- [ ] **M9 — AI v1 resumes** (unhold M4), then AI v2: agentic edits w/ diff review.
+- [ ] **M10+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
 
 ## Workspace layout
 
