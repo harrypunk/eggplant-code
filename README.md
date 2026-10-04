@@ -30,6 +30,9 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `Space` | which-key menu: `f` file, `b` buffer, `q` quit, `t` theme, `p` palette |
 | `C-S-p` (or `C-p`) | command palette — fuzzy over the complete command list |
 | `C-e` | toggle file explorer |
+| explorer: `j`/`k` | move |
+| explorer: `l` / `h` | expand directory / collapse (or jump to parent) |
+| explorer: `Enter` | open file, toggle directory |
 | `C-h` / `C-l` | move window focus left / right (editor ↔ explorer) |
 | `C-s` | save |
 | `C-q` / `C-c` | quit (confirm on unsaved) / force-quit |

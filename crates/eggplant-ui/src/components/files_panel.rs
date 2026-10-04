@@ -1,4 +1,4 @@
-//! The file-explorer panel: titled border + entry list with selection.
+//! The file-explorer panel: titled border + indented tree with selection.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -7,20 +7,29 @@ use ratatui::text::{Line, Span};
 use crate::element::Element;
 use crate::theme::Theme;
 
-/// One panel entry, projected for display.
-pub struct EntryProps {
+/// One visible tree row, projected for display.
+pub struct RowProps {
     pub name: String,
-    pub is_dir: bool,
+    /// Nesting depth (0 = directly under the root).
+    pub depth: usize,
+    pub kind: RowKind,
+}
+
+pub enum RowKind {
+    /// A directory; `expanded` drives the ▸/▾ marker.
+    Dir {
+        expanded: bool,
+    },
+    File,
 }
 
 /// Everything the panel view needs — nothing more.
 pub struct FilesPanelProps {
-    /// Panel title (current directory, display-formatted).
+    /// Panel title (the fixed root, display-formatted).
     pub title: String,
-    /// Entries from the scroll offset onward (the widget clips the rest).
-    pub entries: Vec<EntryProps>,
-    /// Selection index, relative to the *full* entry list (the view is
-    /// already offset, so rows before it are skipped by the container).
+    /// Rows from the scroll offset onward (the widget clips the rest).
+    pub rows: Vec<RowProps>,
+    /// Selection index relative to the scrolled window.
     pub selected_in_view: usize,
     pub focused: bool,
 }
@@ -33,21 +42,22 @@ pub fn view(props: &FilesPanelProps, _area: Rect, theme: &Theme) -> Element {
     };
 
     let rows: Vec<Line> = props
-        .entries
+        .rows
         .iter()
         .enumerate()
-        .map(|(i, entry)| {
-            let label = if entry.is_dir {
-                format!("{}/", entry.name)
-            } else {
-                entry.name.clone()
+        .map(|(i, row)| {
+            let marker = match row.kind {
+                RowKind::Dir { expanded: true } => "▾ ",
+                RowKind::Dir { expanded: false } => "▸ ",
+                RowKind::File => "  ",
             };
+            let label = format!("{}{}{}", "  ".repeat(row.depth), marker, row.name);
             let style = if i == props.selected_in_view {
                 Style::default()
                     .fg(theme.fg)
                     .bg(theme.selection)
                     .add_modifier(Modifier::BOLD)
-            } else if entry.is_dir {
+            } else if matches!(row.kind, RowKind::Dir { .. }) {
                 Style::default().fg(theme.info)
             } else {
                 Style::default().fg(theme.fg)
