@@ -11,4 +11,5 @@ pub mod palette;
 pub mod statusline;
 pub mod toasts;
 pub mod topbar;
+pub mod welcome;
 pub mod which_key;

@@ -7,37 +7,6 @@ use ratatui::text::{Line, Span};
 use crate::element::Element;
 use crate::theme::Theme;
 
-/// Empty-editor placeholder (no buffer open — e.g. directory startup).
-/// A centered hint block, vscode-welcome style.
-pub fn empty_view(area: Rect, theme: &Theme) -> Element {
-    let hints = [
-        Span::styled("eggplant-code", Style::default().fg(theme.accent)),
-        Span::raw(""),
-        Span::styled(
-            "C-e explorer  ·  Space commands  ·  C-S-p palette",
-            Style::default().fg(theme.comment),
-        ),
-    ];
-    let width = hints.iter().map(|s| s.content.len()).max().unwrap_or(0) as u16;
-    let block = Rect {
-        x: area.x + area.width.saturating_sub(width) / 2,
-        y: area.y + area.height.saturating_sub(3) / 2,
-        width,
-        height: 3,
-    };
-    Element::Stack(vec![
-        Element::Text {
-            lines: vec![],
-            style: Style::default().bg(theme.bg),
-            wrap: false,
-        },
-        Element::fixed(
-            block,
-            Element::text(hints.into_iter().map(Line::from).collect()),
-        ),
-    ])
-}
-
 /// Everything the editor view needs — nothing more.
 pub struct EditorProps {
     /// Visible document lines (already sliced to the viewport).

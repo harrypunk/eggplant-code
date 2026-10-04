@@ -11,8 +11,11 @@ use ratatui::layout::Rect;
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::components::editor::{self, EditorProps};
+use crate::components::welcome::{self, WelcomeProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An editor-mode action. `count` is the parsed count prefix (default 1).
 type EditorCommand = fn(&mut App, usize) -> KeyResult;
@@ -249,7 +252,7 @@ impl EditorSurface {
 impl Layer for EditorSurface {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         if !app.editor.has_buffer() {
-            return editor::empty_view(area, &app.theme);
+            return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
         }
         editor::view(
             &EditorProps {
