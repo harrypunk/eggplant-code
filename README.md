@@ -13,7 +13,7 @@ UI/UX matures — see [PLAN.md](PLAN.md) for the roadmap.
 ```sh
 cargo run                   # scratch buffer
 cargo run -- foo.rs         # edit a file
-cargo run -- .              # open a directory: scratch + file explorer (netrw-style)
+cargo run -- .              # open a directory: file explorer + welcome screen
 ```
 
 ## Keys
@@ -37,8 +37,36 @@ cargo run -- .              # open a directory: scratch + file explorer (netrw-s
 ## Themes
 
 Semantic theme slots; built-ins `tokyo-night` (default) and `classic`.
-Switch at runtime with `:theme <name>`. Custom theme files
-(ghostty-style) are on the roadmap (M7).
+Cycle at runtime with `Space t`. Custom theme files (ghostty-style) are on
+the roadmap (M8).
+
+## Language support (syntax highlighting)
+
+Fully **helix-compatible** — if you already use helix, there is nothing new
+to set up. Language configs, queries, and grammars are discovered from
+helix's runtime directories, in priority order:
+
+1. `~/.config/helix/runtime` (where `hx --grammar build` puts grammars)
+2. `$HELIX_RUNTIME`
+3. a `runtime/` dir next to the executable
+4. `languages.toml`: helix's built-in default, merged with your
+   `~/.config/helix/languages.toml` if present
+
+So: grammars built once for helix (queries + `.so` files) are shared with
+eggplant-code as-is. If your helix came from a distro package, point at its
+runtime once:
+
+```sh
+export HELIX_RUNTIME=/usr/lib64/helix/runtime   # or /usr/lib/helix/runtime
+# or: ln -s /usr/lib64/helix/runtime ~/.config/helix/runtime
+```
+
+Adding a language never requires code changes: drop the grammar `.so` +
+`queries/<lang>/highlights.scm` into a runtime dir and (for brand-new
+languages) add an entry to `~/.config/helix/languages.toml`.
+
+Files without a grammar fall back to plain text — the editor always works.
+Highlight colors come from the active theme's syntax slots.
 
 ## Development
 
