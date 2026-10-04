@@ -83,6 +83,16 @@ impl Theme {
     pub fn available() -> Vec<&'static str> {
         BUILTINS.iter().map(|t| t.name).collect()
     }
+
+    /// The theme after `current` in the registry (wrapping).
+    pub fn next_after(current: &str) -> Theme {
+        let index = BUILTINS
+            .iter()
+            .position(|t| t.name == current)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        BUILTINS[index % BUILTINS.len()]
+    }
 }
 
 impl Default for Theme {

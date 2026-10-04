@@ -27,8 +27,8 @@ cargo run -- .              # open a directory: scratch + file explorer (netrw-s
 | `i` `a` `o` `O` | insert / append / open below / above |
 | `x` | delete char under cursor |
 | `Esc` | back to normal mode |
-| `:` | command line (`w` `q` `wq` `q!` `e` `b` `bd` `bn` `bp` `ls` `theme`) |
-| `Space` | command palette (fuzzy) |
+| `Space` | which-key menu: `f` file, `b` buffer, `q` quit, `t` theme, `p` palette |
+| `C-S-p` (or `C-p`) | command palette — fuzzy over the complete command list |
 | `C-e` | toggle file explorer |
 | `C-h` / `C-l` | move window focus left / right (editor ↔ explorer) |
 | `C-s` | save |

@@ -11,7 +11,6 @@ pub mod commands;
 pub mod components;
 pub mod compositor;
 pub mod element;
-pub mod ex_commands;
 pub mod fuzzy;
 pub mod layers;
 pub mod runner;

@@ -13,8 +13,6 @@ use crate::commands::KeyStroke;
 use crate::components::editor::{self, EditorProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
-use crate::layers::command_line::CommandLine;
-use crate::layers::palette::Palette;
 
 /// An editor-mode action. `count` is the parsed count prefix (default 1).
 type EditorCommand = fn(&mut App, usize) -> KeyResult;
@@ -107,15 +105,9 @@ fn delete_forward(app: &mut App, _: usize) -> KeyResult {
     consumed()
 }
 
-fn open_command_line(_app: &mut App, _: usize) -> KeyResult {
-    KeyResult::Push(Box::new(CommandLine::new()))
-}
-
-fn open_palette(app: &mut App, _: usize) -> KeyResult {
-    KeyResult::Push(Box::new(Palette::new(app.registry.commands().to_vec())))
-}
-
 /// Normal-mode bindings. Digits are handled separately (count prefix).
+/// `Space` is deliberately unbound here: it falls through to the global
+/// keymap, which opens the which-key menu.
 static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('h'), move_left),
     (KeyStroke::new(KeyCode::Left, KeyModifiers::NONE), move_left),
@@ -139,8 +131,6 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('a'), enter_append),
     (KeyStroke::char('o'), open_below),
     (KeyStroke::char('O'), open_above),
-    (KeyStroke::char(':'), open_command_line),
-    (KeyStroke::char(' '), open_palette),
 ];
 
 /// Insert-mode bindings; unbound plain chars insert themselves.

@@ -21,8 +21,8 @@ use crate::topbar;
 /// Result of dispatching a key to a layer.
 ///
 /// Structural results (`Close`, `Unfocus`, `Push`) are handled by the
-/// compositor itself; `Execute`/`RunEx` are effects the compositor runs on
-/// the layer's behalf (layers can't touch the compositor directly).
+/// compositor itself; `Execute` is an effect the compositor runs on the
+/// layer's behalf (layers can't touch the compositor directly).
 pub enum KeyResult {
     /// The layer handled the key; stop propagation.
     Consumed,
@@ -36,8 +36,6 @@ pub enum KeyResult {
     Push(Box<dyn Layer>),
     /// Close this layer, then run a registry command.
     Execute(Command),
-    /// Close this layer, then run a `:` command line input.
-    RunEx(String),
 }
 
 /// Which side a panel docks against.
@@ -295,11 +293,6 @@ impl Compositor {
             KeyResult::Execute(command) => {
                 self.remove(index);
                 (command.execute)(app, self);
-                KeyResult::Consumed
-            }
-            KeyResult::RunEx(input) => {
-                self.remove(index);
-                crate::ex_commands::execute(app, self, &input);
                 KeyResult::Consumed
             }
             other => other,

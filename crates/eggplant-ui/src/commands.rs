@@ -11,6 +11,9 @@ use crate::compositor::{Compositor, FocusDirection};
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::notification::Notification;
+use crate::layers::palette::Palette;
+use crate::layers::which_key::WhichKey;
+use crate::theme::Theme;
 
 /// A key + modifier combination that can trigger a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +33,13 @@ impl KeyStroke {
 
     pub const fn ctrl(c: char) -> Self {
         Self::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    pub const fn ctrl_shift(c: char) -> Self {
+        Self::new(
+            KeyCode::Char(c),
+            KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+        )
     }
 
     pub const fn function(n: u8) -> Self {
@@ -86,6 +96,98 @@ impl Registry {
     }
 }
 
+/// One node in the which-key tree (`Space` prefix menu).
+pub enum KeyNode {
+    /// A command leaf: pressing `key` executes the registry command.
+    Leaf {
+        key: char,
+        description: &'static str,
+        command: &'static str,
+    },
+    /// A submenu: pressing `key` descends.
+    Group {
+        key: char,
+        description: &'static str,
+        children: &'static [KeyNode],
+    },
+}
+
+impl KeyNode {
+    pub fn key(&self) -> char {
+        match self {
+            KeyNode::Leaf { key, .. } | KeyNode::Group { key, .. } => *key,
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            KeyNode::Leaf { description, .. } | KeyNode::Group { description, .. } => description,
+        }
+    }
+}
+
+/// The which-key root (`Space`). Common commands; the full list lives in the
+/// palette (`C-S-p`).
+pub static WHICH_KEY_ROOT: &[KeyNode] = &[
+    KeyNode::Group {
+        key: 'f',
+        description: "+file",
+        children: &[
+            KeyNode::Leaf {
+                key: 's',
+                description: "save",
+                command: "file.save",
+            },
+            KeyNode::Leaf {
+                key: 'q',
+                description: "save & quit",
+                command: "file.save-quit",
+            },
+            KeyNode::Leaf {
+                key: 'e',
+                description: "explorer",
+                command: "panel.files.toggle",
+            },
+        ],
+    },
+    KeyNode::Group {
+        key: 'b',
+        description: "+buffer",
+        children: &[
+            KeyNode::Leaf {
+                key: 'n',
+                description: "next",
+                command: "buffer.next",
+            },
+            KeyNode::Leaf {
+                key: 'p',
+                description: "prev",
+                command: "buffer.prev",
+            },
+            KeyNode::Leaf {
+                key: 'd',
+                description: "close",
+                command: "buffer.close",
+            },
+        ],
+    },
+    KeyNode::Leaf {
+        key: 'q',
+        description: "quit",
+        command: "app.quit",
+    },
+    KeyNode::Leaf {
+        key: 't',
+        description: "cycle theme",
+        command: "theme.cycle",
+    },
+    KeyNode::Leaf {
+        key: 'p',
+        description: "command palette",
+        command: "palette.open",
+    },
+];
+
 /// The default registry: all global commands + their key bindings.
 pub fn default_registry() -> Registry {
     let commands = vec![
@@ -130,6 +232,47 @@ pub fn default_registry() -> Registry {
             execute: |app, _| app.editor.prev_buffer(),
         },
         Command {
+            id: "buffer.close",
+            description: "Close the current buffer (fails on unsaved changes)",
+            execute: |app, _| {
+                if let Err(err) = app.editor.close_current_buffer(false) {
+                    app.notifications
+                        .push(Notification::error(format!("{err:#}")));
+                }
+            },
+        },
+        Command {
+            id: "file.save-quit",
+            description: "Save the current buffer, then quit",
+            execute: |app, compositor| match app.editor.save() {
+                Ok(()) => quit(app, compositor),
+                Err(err) => app
+                    .notifications
+                    .push(Notification::error(format!("save failed: {err:#}"))),
+            },
+        },
+        Command {
+            id: "palette.open",
+            description: "Open the command palette",
+            execute: |app, compositor| {
+                compositor.push(Box::new(Palette::new(app.registry.commands().to_vec())));
+            },
+        },
+        Command {
+            id: "which-key.open",
+            description: "Open the key-hints menu (Space prefix)",
+            execute: |_, compositor| compositor.push(Box::new(WhichKey::root())),
+        },
+        Command {
+            id: "theme.cycle",
+            description: "Cycle to the next color theme",
+            execute: |app, _| {
+                app.theme = Theme::next_after(app.theme.name);
+                app.notifications
+                    .push(Notification::info(format!("theme: {}", app.theme.name)));
+            },
+        },
+        Command {
             id: "demo.dialog",
             description: "Toggle demo floating dialog",
             execute: toggle_demo_dialog,
@@ -140,15 +283,24 @@ pub fn default_registry() -> Registry {
             execute: demo_notification,
         },
     ];
+    // Command indices (order of the vec above):
+    //   0 app.quit  1 app.force-quit  2 file.save  3 panel.files.toggle
+    //   4 window.focus-left  5 window.focus-right  6 buffer.next  7 buffer.prev
+    //   8 buffer.close  9 file.save-quit  10 palette.open  11 which-key.open
+    //   12 theme.cycle  13 demo.dialog  14 demo.notification
     let keymap = vec![
-        (KeyStroke::ctrl('c'), 1),   // app.force-quit
-        (KeyStroke::ctrl('q'), 0),   // app.quit
-        (KeyStroke::ctrl('s'), 2),   // file.save
-        (KeyStroke::ctrl('e'), 3),   // panel.files.toggle
-        (KeyStroke::ctrl('h'), 4),   // window.focus-left
-        (KeyStroke::ctrl('l'), 5),   // window.focus-right
-        (KeyStroke::function(2), 8), // demo.dialog
-        (KeyStroke::function(3), 9), // demo.notification
+        (KeyStroke::ctrl('c'), 1),        // app.force-quit
+        (KeyStroke::ctrl('q'), 0),        // app.quit
+        (KeyStroke::ctrl('s'), 2),        // file.save
+        (KeyStroke::ctrl('e'), 3),        // panel.files.toggle
+        (KeyStroke::ctrl('h'), 4),        // window.focus-left
+        (KeyStroke::ctrl('l'), 5),        // window.focus-right
+        (KeyStroke::ctrl_shift('p'), 10), // palette.open
+        (KeyStroke::ctrl_shift('P'), 10), // (terminal casing varies)
+        (KeyStroke::ctrl('p'), 10),       // palette.open (fallback: no kitty protocol)
+        (KeyStroke::char(' '), 11),       // which-key.open (prefix menu)
+        (KeyStroke::function(2), 13),     // demo.dialog
+        (KeyStroke::function(3), 14),     // demo.notification
     ];
     Registry::new(commands, keymap)
 }
