@@ -98,7 +98,9 @@ A custom, AI-native terminal editor with an opinionated UI layout.
       buffers: open/switch/next/prev/close in facade)
 - [ ] **M4 — AI v1 (native agent)**: minimal Rust agent loop (pi-inspired): provider
       abstraction + streaming chat into a toggleable panel; grows into agentic edits later.
-- [ ] **M5 — Syntax highlighting**: tree-sitter via helix-core, themes.
+- [ ] **M5 — Syntax highlighting**: tree-sitter via helix-core; highlight styles read the
+      theme's semantic slots (theme system landed first for this reason — `theme.rs`,
+      built-ins tokyo-night/classic, `:theme <name>`; custom theme files à la ghostty in M7).
 - [ ] **M6 — LSP / AI v2**: LSP features; agentic edits w/ diff review.
 - [ ] **M7+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
 
