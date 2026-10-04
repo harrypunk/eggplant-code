@@ -100,18 +100,33 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 - [ ] **M4 — AI v1 (native agent)** — **ON HOLD**: editor UI/UX milestones come first;
       resume when the editing experience is solid. Minimal Rust agent loop (pi-inspired):
       provider abstraction + streaming chat into a toggleable panel; agentic edits later.
-- [ ] **M5 — Syntax highlighting**: tree-sitter via helix-core; highlight styles read the
+- [ ] **M5 — Command & window UX** (current focus):
+      - **Buffer topbar**: tabline chrome above the editor showing open buffers
+        (neovim/vscode style): name, modified dot, current highlighted.
+      - **Windows, not layers-with-focus**: editor and file explorer are equal windows;
+        navigate directionally with `C-h`/`C-l` (neovim `C-w h/l` model), replacing `C-w`
+        focus cycling (which has a hang bug when toggling back to the editor — superseded
+        by this model, verify gone).
+      - **Command entries, two roles** (vscode/lazyvim split):
+        - palette = *complete* command list, rebound to `C-S-p` (fuzzy over registry).
+        - `Space` = which-key style prefix menu for *common* commands: popup shows
+          available subsequent keys, updates per keystroke (`Space f` file, `Space b`
+          buffers, …). Builds the keymap-tree infra M7 sequences (`gg`) will reuse.
+        - remove the `:` command line + ex table entirely (duplicate of the above;
+          fs ops like `:e`/`:ls` are covered by the explorer and later grep).
+- [ ] **M6 — Syntax highlighting**: tree-sitter via helix-core; highlight styles read the
       theme's semantic slots (theme system landed first for this reason — `theme.rs`,
       built-ins tokyo-night/classic, `:theme <name>`).
-- [ ] **M6 — Editing UX**: undo/redo (`u`/`U`), delete/yank/paste with textobjects
-      (`dw`, `yy`, `p`), visual mode (`v`), key sequences (`gg`, `ge` — needs pending-key
-      infra), search (`/`), horizontal scroll or soft-wrap (long lines are unreachable today).
-- [ ] **M7 — Chrome UX**: buffer picker (`Space b`), custom theme files (ghostty-style
+- [ ] **M7 — Editing UX**: undo/redo (`u`/`U`), delete/yank/paste with textobjects
+      (`dw`, `yy`, `p`), visual mode (`v`), key sequences (`gg`, `ge` — keymap-tree infra
+      lands in M5 via which-key), search (`/`), horizontal scroll or soft-wrap (long lines
+      are unreachable today).
+- [ ] **M8 — Chrome UX**: custom theme files (ghostty-style
       `~/.config/eggplant/themes/*.toml`), per-buffer view memory (cursor+scroll survive
       buffer switches), pending-key/count display in statusline, mouse support.
-- [ ] **M8 — LSP**: diagnostics/goto/completion via helix-lsp (reused, behind the facade).
-- [ ] **M9 — AI v1 resumes** (unhold M4), then AI v2: agentic edits w/ diff review.
-- [ ] **M10+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
+- [ ] **M9 — LSP**: diagnostics/goto/completion via helix-lsp (reused, behind the facade).
+- [ ] **M10 — AI v1 resumes** (unhold M4), then AI v2: agentic edits w/ diff review.
+- [ ] **M11+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
 
 ## Workspace layout
 
