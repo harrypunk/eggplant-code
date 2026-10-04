@@ -248,6 +248,9 @@ impl EditorSurface {
 
 impl Layer for EditorSurface {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
+        if !app.editor.has_buffer() {
+            return editor::empty_view(area, &app.theme);
+        }
         editor::view(
             &EditorProps {
                 lines: app

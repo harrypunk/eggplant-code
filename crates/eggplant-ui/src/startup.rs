@@ -37,7 +37,8 @@ impl StartupTarget {
 pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
     let editor = match target {
         StartupTarget::File(path) => Editor::open(path),
-        _ => Editor::scratch(),
+        StartupTarget::Directory(_) => Editor::empty(),
+        StartupTarget::Scratch => Editor::scratch(),
     }
     .map_err(io::Error::other)?;
 

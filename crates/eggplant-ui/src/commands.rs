@@ -310,7 +310,10 @@ pub fn default_registry() -> Registry {
 /// Save the current buffer, reporting the outcome as a notification.
 pub(crate) fn save_with_notification(app: &mut App, _: &mut Compositor) {
     let notification = match app.editor.save() {
-        Ok(()) => Notification::info(format!("wrote {}", app.editor.display_name())),
+        Ok(()) => Notification::info(format!(
+            "wrote {}",
+            app.editor.display_name().unwrap_or_default()
+        )),
         Err(err) => Notification::error(format!("save failed: {err:#}")),
     };
     app.notifications.push(notification);

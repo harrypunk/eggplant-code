@@ -11,11 +11,11 @@ use crate::theme::Theme;
 /// Everything the statusline needs — nothing more.
 pub struct StatuslineProps {
     pub mode: Mode,
-    pub buffer_name: String,
+    /// Current buffer name; `None` when no buffer is open.
+    pub buffer_name: Option<String>,
     pub modified: bool,
-    /// Cursor as (line, col) in document coordinates.
-    pub cursor: (usize, usize),
-    pub line_count: usize,
+    /// Cursor (line, col) + total lines; `None` when no buffer is open.
+    pub position: Option<(usize, usize, usize)>,
     /// Focused layer id, shown as a tag when it isn't the base editor.
     pub focused_layer: Option<&'static str>,
 }
@@ -26,25 +26,24 @@ pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
         Mode::Insert => theme.mode_insert,
     };
     let modified = if props.modified { " [+]" } else { "" };
+    let name = props.buffer_name.clone().unwrap_or_default();
     let focus_tag = match props.focused_layer {
         Some(id) if id != "editor" => format!(" ‹{id}›"),
         _ => String::new(),
     };
-    let right = format!(
-        " {}:{}/{} ",
-        props.cursor.0 + 1,
-        props.cursor.1 + 1,
-        props.line_count
-    );
+    let right = props.position.map_or(String::new(), |(line, col, total)| {
+        format!(" {}:{}/{} ", line + 1, col + 1, total)
+    });
 
-    let left_width = 2
-        + props.mode.as_str().len()
-        + 1
-        + props.buffer_name.len()
-        + modified.len()
-        + focus_tag.len();
+    let left_width =
+        2 + props.mode.as_str().len() + 1 + name.len() + modified.len() + focus_tag.len();
     let padding = (area.width as usize).saturating_sub(left_width + right.len());
 
+    let name_span = if props.buffer_name.is_some() {
+        format!(" {name}{modified}")
+    } else {
+        String::new()
+    };
     let line = Line::from(vec![
         Span::styled(
             format!(" {} ", props.mode),
@@ -53,7 +52,7 @@ pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
                 .bg(mode_bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!(" {}{modified}", props.buffer_name)),
+        Span::raw(name_span),
         Span::styled(focus_tag, Style::default().fg(theme.accent_alt)),
         Span::raw(" ".repeat(padding)),
         Span::raw(right),

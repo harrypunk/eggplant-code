@@ -111,7 +111,8 @@ pub struct BufferInfo {
 pub struct Editor {
     buffers: Vec<Buffer>,
     /// Index of the current buffer in `buffers`.
-    current: usize,
+    /// Index of the current buffer; `None` when no buffer is open.
+    current: Option<usize>,
     view_id: ViewId,
     mode: Mode,
     /// Bumped whenever the *identity* of the current document changes
@@ -135,11 +136,23 @@ impl Editor {
         Ok(Self::new(Buffer::new(doc), backend))
     }
 
+    /// No buffers at all (directory startup: explorer + empty editor).
+    pub fn empty() -> Result<Self> {
+        Ok(Self {
+            buffers: Vec::new(),
+            current: None,
+            view_id: ViewId::default(),
+            mode: Mode::Normal,
+            generation: 0,
+            backend: Backend::new()?,
+        })
+    }
+
     fn new(buffer: Buffer, backend: Backend) -> Self {
         let view_id = ViewId::default();
         let mut editor = Self {
             buffers: vec![buffer],
-            current: 0,
+            current: Some(0),
             view_id,
             mode: Mode::Normal,
             generation: 0,
@@ -151,15 +164,28 @@ impl Editor {
 
     fn reset_cursor(&mut self) {
         let view_id = self.view_id;
-        self.doc_mut().set_selection(view_id, Selection::point(0));
+        if let Some(doc) = self.doc_mut() {
+            doc.set_selection(view_id, Selection::point(0));
+        }
     }
 
+    /// The current buffer's document. Private helpers assume `Some` — every
+    /// public method guards on `has_buffer()` first.
     fn doc(&self) -> &Document {
-        &self.buffers[self.current].doc
+        self.doc_opt().expect("current buffer")
     }
 
-    fn doc_mut(&mut self) -> &mut Document {
-        &mut self.buffers[self.current].doc
+    fn doc_opt(&self) -> Option<&Document> {
+        self.current.map(|i| &self.buffers[i].doc)
+    }
+
+    fn doc_mut(&mut self) -> Option<&mut Document> {
+        self.current.map(|i| &mut self.buffers[i].doc)
+    }
+
+    /// Index of the current buffer; `None` when no buffer is open.
+    pub fn current_buffer(&self) -> Option<usize> {
+        self.current
     }
 
     // ---- buffers ----
@@ -174,7 +200,7 @@ impl Editor {
         }
         let doc = self.backend.open_document(path)?;
         self.buffers.push(Buffer::new(doc));
-        self.current = self.buffers.len() - 1;
+        self.current = Some(self.buffers.len() - 1);
         self.reset_cursor();
         self.generation += 1;
         Ok(())
@@ -184,8 +210,8 @@ impl Editor {
         if index >= self.buffers.len() {
             bail!("no buffer {}", index + 1);
         }
-        if index != self.current {
-            self.current = index;
+        if self.current != Some(index) {
+            self.current = Some(index);
             self.reset_cursor();
             self.generation += 1;
         }
@@ -193,30 +219,37 @@ impl Editor {
     }
 
     /// Close the current buffer. Refuses when it has unsaved changes unless
-    /// `force`. Closing the last buffer replaces it with a fresh scratch.
+    /// `force`. Closing the last buffer leaves the editor empty (no buffer).
     pub fn close_current_buffer(&mut self, force: bool) -> Result<()> {
+        let Some(index) = self.current else {
+            bail!("no buffer to close");
+        };
         if self.is_modified() && !force {
             bail!("unsaved changes (use ! to discard)");
         }
-        self.buffers.remove(self.current);
-        if self.buffers.is_empty() {
-            let doc = self.backend.scratch_document();
-            self.buffers.push(Buffer::new(doc));
-        }
-        self.current = self.current.min(self.buffers.len() - 1);
+        self.buffers.remove(index);
+        self.current = if self.buffers.is_empty() {
+            None
+        } else {
+            Some(index.min(self.buffers.len() - 1))
+        };
         self.reset_cursor();
         self.generation += 1;
         Ok(())
     }
 
     pub fn next_buffer(&mut self) {
-        let next = (self.current + 1) % self.buffers.len();
-        let _ = self.switch_buffer(next);
+        if let Some(current) = self.current {
+            let next = (current + 1) % self.buffers.len();
+            let _ = self.switch_buffer(next);
+        }
     }
 
     pub fn prev_buffer(&mut self) {
-        let prev = (self.current + self.buffers.len() - 1) % self.buffers.len();
-        let _ = self.switch_buffer(prev);
+        if let Some(current) = self.current {
+            let prev = (current + self.buffers.len() - 1) % self.buffers.len();
+            let _ = self.switch_buffer(prev);
+        }
     }
 
     pub fn buffers_info(&self) -> Vec<BufferInfo> {
@@ -227,7 +260,7 @@ impl Editor {
                 index,
                 name: b.display_name(),
                 modified: b.edits_since_save > 0,
-                current: index == self.current,
+                current: Some(index) == self.current,
                 scratch: b.doc.path().is_none(),
             })
             .collect()
@@ -237,8 +270,9 @@ impl Editor {
         self.buffers.len()
     }
 
-    pub fn current_buffer(&self) -> usize {
-        self.current
+    /// Whether any buffer is open (false after directory startup).
+    pub fn has_buffer(&self) -> bool {
+        self.current.is_some()
     }
 
     /// True when any buffer has unsaved changes (used by quit guards).
@@ -258,15 +292,22 @@ impl Editor {
     }
 
     pub fn is_modified(&self) -> bool {
-        self.buffers[self.current].edits_since_save > 0
+        self.current
+            .is_some_and(|i| self.buffers[i].edits_since_save > 0)
     }
 
     pub fn line_count(&self) -> usize {
+        if self.current.is_none() {
+            return 0;
+        }
         self.doc().text().len_lines()
     }
 
     /// The document's lines in `range` (clamped), with line endings stripped.
     pub fn lines(&self, range: std::ops::Range<usize>) -> Vec<String> {
+        if self.current.is_none() {
+            return Vec::new();
+        }
         let text = self.doc().text();
         let end = range.end.min(self.line_count());
         (range.start.min(end)..end)
@@ -279,6 +320,9 @@ impl Editor {
 
     /// Primary cursor as `(line, column)` in char units.
     pub fn cursor(&self) -> (usize, usize) {
+        if self.current.is_none() {
+            return (0, 0);
+        }
         let text = self.doc().text();
         let pos = self.cursor_char_idx();
         let line = text.char_to_line(pos);
@@ -312,6 +356,7 @@ impl Editor {
             Mode::Insert => Range::new((pos + 1).min(len), pos),
         };
         self.doc_mut()
+            .expect("current buffer")
             .set_selection(view_id, Selection::single(range.anchor, range.head));
     }
 
@@ -319,6 +364,9 @@ impl Editor {
 
     /// `i` — insert before the block cursor.
     pub fn enter_insert(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let pos = self.cursor_char_idx();
         self.mode = Mode::Insert;
         self.set_cursor(pos);
@@ -326,6 +374,9 @@ impl Editor {
 
     /// `a` — insert after the block cursor (append).
     pub fn enter_append(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         // After the grapheme under the cursor; on empty lines (cursor sits on
@@ -343,6 +394,9 @@ impl Editor {
     /// grapheme from the insert position and never rests on a line ending
     /// (unless the line is empty).
     pub fn enter_normal(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         if self.mode == Mode::Normal {
             return;
         }
@@ -363,6 +417,9 @@ impl Editor {
     // ---- movements ----
 
     pub fn move_left(&mut self, count: usize) {
+        if self.current.is_none() {
+            return;
+        }
         let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         let line_start = text.line_to_char(text.char_to_line(pos));
@@ -372,6 +429,9 @@ impl Editor {
     }
 
     pub fn move_right(&mut self, count: usize) {
+        if self.current.is_none() {
+            return;
+        }
         let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         let new = nth_next_grapheme_boundary(text, pos, count);
@@ -390,6 +450,9 @@ impl Editor {
     }
 
     fn move_lines(&mut self, delta: isize) {
+        if self.current.is_none() {
+            return;
+        }
         let (line, col) = self.cursor();
         let last = self.line_count().saturating_sub(1);
         let target = line.saturating_add_signed(delta).min(last);
@@ -423,17 +486,26 @@ impl Editor {
     }
 
     pub fn move_line_start(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let (line, _) = self.cursor();
         self.set_cursor_on_line(line, 0);
     }
 
     pub fn move_line_end(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let (line, _) = self.cursor();
         let end = self.line_char_len(line).saturating_sub(1);
         self.set_cursor_on_line(line, end);
     }
 
     pub fn move_last_line(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let (_, col) = self.cursor();
         let last = self.line_count().saturating_sub(1);
         self.set_cursor_on_line(last, col);
@@ -441,6 +513,9 @@ impl Editor {
 
     /// Go to `line` (0-based, clamped), keeping the column where possible.
     pub fn move_to_line(&mut self, line: usize) {
+        if self.current.is_none() {
+            return;
+        }
         let (_, col) = self.cursor();
         let target = line.min(self.line_count().saturating_sub(1));
         self.set_cursor_on_line(target, col);
@@ -474,6 +549,9 @@ impl Editor {
         target: impl Fn(helix_core::RopeSlice, helix_core::selection::Range) -> usize,
         count: usize,
     ) {
+        if self.current.is_none() {
+            return;
+        }
         let text = self.doc().text().slice(..);
         let range = self.doc().selection(self.view_id).primary();
         let new = motion(text, range, count);
@@ -486,9 +564,15 @@ impl Editor {
     // ---- edits ----
 
     fn apply(&mut self, transaction: Transaction) {
+        if self.current.is_none() {
+            return;
+        }
         let view_id = self.view_id;
-        self.doc_mut().apply(&transaction, view_id);
-        self.buffers[self.current].edits_since_save += 1;
+        let doc = self.doc_mut().expect("current buffer");
+        doc.apply(&transaction, view_id);
+        if let Some(i) = self.current_buffer() {
+            self.buffers[i].edits_since_save += 1;
+        }
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -496,6 +580,9 @@ impl Editor {
     }
 
     pub fn insert_str(&mut self, s: &str) {
+        if self.current.is_none() {
+            return;
+        }
         let transaction = Transaction::insert(
             self.doc().text(),
             self.doc().selection(self.view_id),
@@ -520,6 +607,9 @@ impl Editor {
     }
 
     fn open_line_at_offset(&mut self, offset: usize) {
+        if self.current.is_none() {
+            return;
+        }
         let (line, _) = self.cursor();
         let target_line = line + offset;
         let insert_at = self
@@ -542,6 +632,9 @@ impl Editor {
     }
 
     pub fn delete_backward(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         if pos == 0 {
@@ -557,6 +650,9 @@ impl Editor {
     /// Delete the grapheme under the cursor (`x` in normal mode).
     /// Never deletes the line ending.
     pub fn delete_char_at_cursor(&mut self) {
+        if self.current.is_none() {
+            return;
+        }
         let text = self.doc().text().slice(..);
         let pos = self.cursor_char_idx();
         if text.get_char(pos).is_none_or(|c| c == '\n') {
@@ -583,28 +679,34 @@ impl Editor {
     // ---- persistence ----
 
     pub fn save(&mut self) -> Result<()> {
-        let future = self
-            .doc_mut()
-            .save::<PathBuf>(None, false)
-            .context("failed to start save")?;
+        if self.current.is_none() {
+            bail!("no buffer to save");
+        }
+        let doc = self.doc_mut().expect("current buffer");
+        let future = doc.save::<PathBuf>(None, false)?;
         let event = self
             .backend
             .runtime
             .block_on(future)
             .context("save failed")?;
-        self.doc_mut()
-            .set_last_saved_revision(event.revision, event.save_time);
-        self.buffers[self.current].edits_since_save = 0;
+        let doc = self.doc_mut().expect("current buffer");
+        doc.set_last_saved_revision(event.revision, event.save_time);
+        if let Some(i) = self.current_buffer() {
+            self.buffers[i].edits_since_save = 0;
+        }
         Ok(())
     }
 
     // ---- introspection for status line ----
 
-    pub fn display_name(&self) -> String {
-        self.doc()
-            .path()
-            .map(relative_display)
-            .unwrap_or_else(|| "untitled".to_owned())
+    /// Current buffer name; `None` when no buffer is open.
+    pub fn display_name(&self) -> Option<String> {
+        let doc = self.doc_opt()?;
+        Some(
+            doc.path()
+                .map(relative_display)
+                .unwrap_or_else(|| "untitled".to_owned()),
+        )
     }
 }
 
@@ -774,13 +876,13 @@ mod tests {
 
         ed.open_buffer(&path_b).unwrap();
         assert_eq!(ed.buffer_count(), 2);
-        assert_eq!(ed.current_buffer(), 1);
+        assert_eq!(ed.current_buffer(), Some(1));
         assert_eq!(text_of(&ed), "bbb");
 
         // Reopening the same path switches instead of duplicating.
         ed.open_buffer(&path_a).unwrap();
         assert_eq!(ed.buffer_count(), 2);
-        assert_eq!(ed.current_buffer(), 0);
+        assert_eq!(ed.current_buffer(), Some(0));
 
         std::fs::remove_file(&path_a).unwrap();
         std::fs::remove_file(&path_b).unwrap();
@@ -807,7 +909,7 @@ mod tests {
     }
 
     #[test]
-    fn close_buffer_guards_unsaved_and_keeps_scratch() {
+    fn close_buffer_guards_unsaved_and_empties_on_last() {
         let mut ed = Editor::scratch().unwrap();
         ed.enter_insert();
         ed.insert_str("dirty");
@@ -815,11 +917,41 @@ mod tests {
 
         // Refuses with unsaved changes.
         assert!(ed.close_current_buffer(false).is_err());
-        // Force closes; last buffer becomes a fresh scratch.
+        // Force closes; closing the last buffer leaves the editor empty.
         ed.close_current_buffer(true).unwrap();
-        assert_eq!(ed.buffer_count(), 1);
-        assert!(!ed.is_modified());
-        assert_eq!(text_of(&ed), "\n");
+        assert_eq!(ed.buffer_count(), 0);
+        assert!(!ed.has_buffer());
+        assert_eq!(ed.current_buffer(), None);
+    }
+
+    #[test]
+    fn empty_editor_is_a_safe_no_op_surface() {
+        let mut ed = Editor::empty().unwrap();
+        assert!(!ed.has_buffer());
+        assert_eq!(ed.buffer_count(), 0);
+        assert_eq!(ed.cursor(), (0, 0));
+        assert_eq!(ed.line_count(), 0);
+        assert!(ed.lines(0..10).is_empty());
+        assert_eq!(ed.display_name(), None);
+        assert!(ed.save().is_err());
+        assert!(ed.close_current_buffer(true).is_err());
+
+        // Everything below must be a no-op, not a panic.
+        ed.enter_insert();
+        assert_eq!(ed.mode(), Mode::Normal); // stays normal without a buffer
+        ed.insert_str("nope");
+        ed.move_down(3);
+        ed.move_word_forward(1);
+        ed.delete_char_at_cursor();
+        ed.next_buffer();
+        ed.prev_buffer();
+
+        // Opening a file into the empty editor works.
+        let path = temp_file("empty-open", "hello");
+        ed.open_buffer(&path).unwrap();
+        assert!(ed.has_buffer());
+        assert_eq!(text_of(&ed), "hello");
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]
@@ -830,9 +962,9 @@ mod tests {
         ed.open_buffer(&path_b).unwrap();
 
         ed.next_buffer();
-        assert_eq!(ed.current_buffer(), 0);
+        assert_eq!(ed.current_buffer(), Some(0));
         ed.prev_buffer();
-        assert_eq!(ed.current_buffer(), 1);
+        assert_eq!(ed.current_buffer(), Some(1));
 
         std::fs::remove_file(&path_a).unwrap();
         std::fs::remove_file(&path_b).unwrap();

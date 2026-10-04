@@ -112,7 +112,7 @@ impl FilesPanel {
             Ok(()) => {
                 app.notifications.push(Notification::info(format!(
                     "opened {}",
-                    app.editor.display_name()
+                    app.editor.display_name().unwrap_or_default()
                 )));
                 KeyResult::Unfocus
             }
