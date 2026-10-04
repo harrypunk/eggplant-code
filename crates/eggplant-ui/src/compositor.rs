@@ -16,6 +16,7 @@ use crate::app::App;
 use crate::commands::Command;
 use crate::element::{self, Element};
 use crate::statusline;
+use crate::topbar;
 
 /// Result of dispatching a key to a layer.
 ///
@@ -88,18 +89,24 @@ pub trait Layer {
     }
 }
 
-/// Screen areas for one frame: one per layer plus the statusline strip.
+/// Screen areas for one frame: one per layer plus the chrome strips.
 #[derive(Debug)]
 pub struct LayoutSolution {
     pub layer_areas: Vec<Rect>,
+    pub topbar: Rect,
     pub statusline: Rect,
 }
 
 /// Pure layout: derive every layer's area from the layer kinds.
-/// Panels dock in z-order; the base fills the remainder; floats get the body.
+/// Chrome: topbar on the first row, statusline on the last. Panels dock in
+/// z-order; the base fills the remainder; floats get the body.
 pub fn compute_layout(kinds: &[LayerKind], area: Rect) -> LayoutSolution {
-    let [body, statusline] =
-        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+    let [topbar, body, statusline] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
 
     let mut remaining = body;
     let mut layer_areas = vec![body; kinds.len()];
@@ -135,6 +142,7 @@ pub fn compute_layout(kinds: &[LayerKind], area: Rect) -> LayoutSolution {
 
     LayoutSolution {
         layer_areas,
+        topbar,
         statusline,
     }
 }
@@ -329,6 +337,7 @@ impl Compositor {
                 .chain([
                     // Components fill their area; positioning is the parent's
                     // job — wrap chrome in Fixed so it lands in its strip.
+                    Element::fixed(solution.topbar, topbar::view(app, solution.topbar)),
                     Element::fixed(
                         solution.statusline,
                         statusline::view(app, focused_id, solution.statusline),
@@ -432,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn statusline_paints_on_the_last_row() {
+    fn statusline_and_topbar_paint_on_the_chrome_rows() {
         // Regression: an unwrapped statusline Element painted into the full
         // screen area, landing on row 0 and tinting the whole frame.
         use eggplant_core::Editor;
@@ -457,13 +466,16 @@ mod tests {
         // Mode pill " NORMAL " on the last row (y=4), not the first.
         assert_eq!(buffer[(1, 4)].symbol(), "N");
         assert_ne!(buffer[(1, 0)].symbol(), "N");
+        // Buffer topbar on the first row: " [scratch] " tab starts at x=1.
+        assert_eq!(buffer[(1, 0)].symbol(), "[");
     }
 
     #[test]
-    fn base_only_gets_body_minus_statusline() {
+    fn base_only_gets_body_minus_chrome() {
         let solution = compute_layout(&[LayerKind::Base], area());
+        assert_eq!(solution.topbar, Rect::new(0, 0, 100, 1));
         assert_eq!(solution.statusline, Rect::new(0, 29, 100, 1));
-        assert_eq!(solution.layer_areas[0], Rect::new(0, 0, 100, 29));
+        assert_eq!(solution.layer_areas[0], Rect::new(0, 1, 100, 28));
     }
 
     #[test]
@@ -476,8 +488,8 @@ mod tests {
             },
         ];
         let solution = compute_layout(&kinds, area());
-        assert_eq!(solution.layer_areas[1], Rect::new(0, 0, 30, 29));
-        assert_eq!(solution.layer_areas[0], Rect::new(30, 0, 70, 29));
+        assert_eq!(solution.layer_areas[1], Rect::new(0, 1, 30, 28));
+        assert_eq!(solution.layer_areas[0], Rect::new(30, 1, 70, 28));
     }
 
     #[test]
@@ -494,9 +506,9 @@ mod tests {
             },
         ];
         let solution = compute_layout(&kinds, area());
-        assert_eq!(solution.layer_areas[1], Rect::new(0, 0, 30, 29));
-        assert_eq!(solution.layer_areas[2], Rect::new(80, 0, 20, 29));
-        assert_eq!(solution.layer_areas[0], Rect::new(30, 0, 50, 29));
+        assert_eq!(solution.layer_areas[1], Rect::new(0, 1, 30, 28));
+        assert_eq!(solution.layer_areas[2], Rect::new(80, 1, 20, 28));
+        assert_eq!(solution.layer_areas[0], Rect::new(30, 1, 50, 28));
     }
 
     #[test]
@@ -510,7 +522,7 @@ mod tests {
             LayerKind::Float,
         ];
         let solution = compute_layout(&kinds, area());
-        assert_eq!(solution.layer_areas[2], Rect::new(0, 0, 100, 29));
-        assert_eq!(solution.layer_areas[0], Rect::new(30, 0, 70, 29));
+        assert_eq!(solution.layer_areas[2], Rect::new(0, 1, 100, 28));
+        assert_eq!(solution.layer_areas[0], Rect::new(30, 1, 70, 28));
     }
 }

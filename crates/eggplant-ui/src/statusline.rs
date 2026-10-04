@@ -15,7 +15,6 @@ pub fn view(app: &App, focused_layer: Option<&'static str>, area: Rect) -> Eleme
             mode: app.editor.mode(),
             buffer_name: app.editor.display_name(),
             modified: app.editor.is_modified(),
-            buffers: (app.editor.current_buffer(), app.editor.buffer_count()),
             cursor: app.editor.cursor(),
             line_count: app.editor.line_count(),
             focused_layer,

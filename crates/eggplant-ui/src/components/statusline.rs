@@ -13,8 +13,6 @@ pub struct StatuslineProps {
     pub mode: Mode,
     pub buffer_name: String,
     pub modified: bool,
-    /// (current index, total) for the buffer indicator.
-    pub buffers: (usize, usize),
     /// Cursor as (line, col) in document coordinates.
     pub cursor: (usize, usize),
     pub line_count: usize,
@@ -28,11 +26,6 @@ pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
         Mode::Insert => theme.mode_insert,
     };
     let modified = if props.modified { " [+]" } else { "" };
-    let buffers = if props.buffers.1 > 1 {
-        format!(" ({}/{})", props.buffers.0 + 1, props.buffers.1)
-    } else {
-        String::new()
-    };
     let focus_tag = match props.focused_layer {
         Some(id) if id != "editor" => format!(" ‹{id}›"),
         _ => String::new(),
@@ -60,7 +53,7 @@ pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
                 .bg(mode_bg)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!(" {}{modified}{buffers}", props.buffer_name)),
+        Span::raw(format!(" {}{modified}", props.buffer_name)),
         Span::styled(focus_tag, Style::default().fg(theme.accent_alt)),
         Span::raw(" ".repeat(padding)),
         Span::raw(right),

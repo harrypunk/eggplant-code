@@ -11,3 +11,4 @@ pub mod files_panel;
 pub mod palette;
 pub mod statusline;
 pub mod toasts;
+pub mod topbar;
