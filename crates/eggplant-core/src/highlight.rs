@@ -106,15 +106,18 @@ pub fn highlight_line(
         if next == u32::MAX as usize || next >= end {
             break;
         }
+        // Injection layers (e.g. markdown in doc comments) emit events whose
+        // offsets revisit bytes before the current position: never move the
+        // scan position backward, or text would be emitted twice.
         if next > pos {
             push_span(&mut spans, text, pos..next, active.last(), loader);
+            pos = next;
         }
         let (event, new) = highlighter.advance();
         match event {
             HighlightEvent::Refresh => active = new.collect(),
             HighlightEvent::Push => active.extend(new),
         }
-        pos = next;
     }
     if pos < end {
         push_span(&mut spans, text, pos..end, active.last(), loader);

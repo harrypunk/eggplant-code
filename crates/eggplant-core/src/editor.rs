@@ -1037,6 +1037,27 @@ mod tests {
     }
 
     #[test]
+    fn doc_comment_injection_does_not_duplicate_text() {
+        let content =
+            "//! Module docs with `code`.\n/// Doc comment with `SyntaxScope` inline.\nfn x() {}\n";
+        let path = temp_file("inject.rs", content);
+        let ed = Editor::open(&path).unwrap();
+        for (line, expected) in content.lines().enumerate() {
+            let spans = ed.highlighted_line(line);
+            if spans.iter().all(|s| s.scope.is_none()) {
+                eprintln!("skipping: no tree-sitter runtime available");
+                break;
+            }
+            let rendered: String = spans.iter().map(|s| s.text.as_str()).collect();
+            assert_eq!(
+                rendered, expected,
+                "line {line} spans overlap/gap: {spans:?}"
+            );
+        }
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
     fn next_prev_buffer_wraps() {
         let path_a = temp_file("wrap-a", "a");
         let path_b = temp_file("wrap-b", "b");
