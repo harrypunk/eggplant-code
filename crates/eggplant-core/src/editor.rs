@@ -21,6 +21,7 @@ use helix_view::ViewId;
 use helix_view::document::Document;
 use helix_view::editor::Config;
 
+use crate::highlight::{self, HighlightedSpan};
 use crate::mode::Mode;
 
 /// Shared, hot-swappable backend configuration (required by helix-view).
@@ -34,10 +35,23 @@ struct Backend {
 
 impl Backend {
     fn new() -> Result<Self> {
+        // Config-driven language support: languages.toml (user's config
+        // merged over helix's embedded default), queries and grammars (.so)
+        // discovered from runtime directories — no languages compiled in.
+        let trust = helix_loader::workspace_trust::WorkspaceTrust::new(Default::default());
+        let loader = helix_core::config::user_lang_loader(&trust)
+            .unwrap_or_else(|_| helix_core::config::default_lang_loader());
+        // Register our highlight vocabulary; query captures resolve to these
+        // by longest-prefix match (e.g. "keyword.storage" -> "keyword").
+        loader.set_scopes(
+            crate::highlight::SCOPE_NAMES
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        );
         Ok(Self {
             config: Arc::new(ArcSwap::from_pointee(Config::default())),
-            // Empty loader: no language detection/highlighting until M5.
-            syn_loader: Arc::new(ArcSwap::from_pointee(syntax::Loader::default())),
+            syn_loader: Arc::new(ArcSwap::from_pointee(loader)),
             runtime: tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -45,15 +59,24 @@ impl Backend {
         })
     }
 
+    /// The shared syntax/language loader (guard derefs through to `Loader`).
+    fn loader(&self) -> impl std::ops::Deref<Target = Arc<syntax::Loader>> + '_ {
+        self.syn_loader.load()
+    }
+
     fn open_document(&self, path: &Path) -> Result<Document> {
-        Document::open(
+        let mut doc = Document::open(
             path,
             None,
             false,
             self.config.clone(),
             self.syn_loader.clone(),
         )
-        .with_context(|| format!("failed to open {}", path.display()))
+        .with_context(|| format!("failed to open {}", path.display()))?;
+        // Detect language + build the syntax tree (no-op gracefully when the
+        // grammar/queries aren't available in any runtime directory).
+        doc.detect_language(&self.syn_loader.load());
+        Ok(doc)
     }
 
     fn scratch_document(&self) -> Document {
@@ -303,19 +326,31 @@ impl Editor {
         self.doc().text().len_lines()
     }
 
-    /// The document's lines in `range` (clamped), with line endings stripped.
-    pub fn lines(&self, range: std::ops::Range<usize>) -> Vec<String> {
-        if self.current.is_none() {
+    /// One line as highlighted spans (plain text when the language is
+    /// unsupported). Clipped of the line ending.
+    pub fn highlighted_line(&self, line: usize) -> Vec<HighlightedSpan> {
+        let Some(i) = self.current else {
+            return Vec::new();
+        };
+        let buffer = &self.buffers[i];
+        let text = buffer.doc.text();
+        if line >= text.len_lines() {
             return Vec::new();
         }
-        let text = self.doc().text();
-        let end = range.end.min(self.line_count());
-        (range.start.min(end)..end)
-            .map(|i| {
-                let line = text.line(i).to_string();
-                line.trim_end_matches(['\r', '\n']).to_owned()
-            })
-            .collect()
+        match buffer.doc.syntax() {
+            Some(syntax) => highlight::highlight_line(text, syntax, &self.backend.loader(), line),
+            None => {
+                let stripped: String = text
+                    .line(line)
+                    .chars()
+                    .take_while(|c| *c != '\n' && *c != '\r')
+                    .collect();
+                vec![HighlightedSpan {
+                    text: stripped,
+                    scope: None,
+                }]
+            }
+        }
     }
 
     /// Primary cursor as `(line, column)` in char units.
@@ -569,6 +604,7 @@ impl Editor {
         }
         let view_id = self.view_id;
         let doc = self.doc_mut().expect("current buffer");
+        // `Document::apply` also incrementally reparses the syntax tree.
         doc.apply(&transaction, view_id);
         if let Some(i) = self.current_buffer() {
             self.buffers[i].edits_since_save += 1;
@@ -713,6 +749,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::highlight::SyntaxScope;
 
     #[test]
     fn relative_display_strips_cwd() {
@@ -732,7 +769,16 @@ mod tests {
     }
 
     fn text_of(editor: &Editor) -> String {
-        editor.lines(0..editor.line_count()).join("\n")
+        (0..editor.line_count())
+            .map(|line| {
+                editor
+                    .highlighted_line(line)
+                    .iter()
+                    .map(|s| s.text.as_str())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Scratch doc, typed `content` in insert mode, back to normal mode.
@@ -745,7 +791,7 @@ mod tests {
     }
 
     fn temp_file(name: &str, content: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("eggplant-{name}-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("eggplant-{}-{name}", std::process::id()));
         std::fs::write(&path, content).unwrap();
         path
     }
@@ -931,7 +977,7 @@ mod tests {
         assert_eq!(ed.buffer_count(), 0);
         assert_eq!(ed.cursor(), (0, 0));
         assert_eq!(ed.line_count(), 0);
-        assert!(ed.lines(0..10).is_empty());
+        assert!(ed.highlighted_line(0).is_empty());
         assert_eq!(ed.display_name(), None);
         assert!(ed.save().is_err());
         assert!(ed.close_current_buffer(true).is_err());
@@ -952,6 +998,42 @@ mod tests {
         assert!(ed.has_buffer());
         assert_eq!(text_of(&ed), "hello");
         std::fs::remove_file(&path).unwrap();
+    }
+
+    // ---- highlighting ----
+
+    #[test]
+    fn scratch_buffer_yields_plain_spans() {
+        let mut ed = Editor::scratch().unwrap();
+        ed.enter_insert();
+        ed.insert_str("hello world");
+        let spans = ed.highlighted_line(0);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].text, "hello world");
+        assert_eq!(spans[0].scope, None);
+    }
+
+    #[test]
+    fn rust_file_is_highlighted_when_runtime_available() {
+        let path = temp_file("highlight.rs", "fn main() { let s = \"hi\"; }\n");
+        let ed = Editor::open(&path).unwrap();
+        let spans = ed.highlighted_line(0);
+        std::fs::remove_file(&path).unwrap();
+
+        if spans.iter().all(|s| s.scope.is_none()) {
+            eprintln!("skipping: no tree-sitter runtime available");
+            return;
+        }
+        let find = |needle: &str| {
+            spans
+                .iter()
+                .find(|s| s.text == needle)
+                .unwrap_or_else(|| panic!("span {needle:?} in {spans:?}"))
+                .scope
+        };
+        assert_eq!(find("fn"), Some(SyntaxScope::Keyword));
+        assert_eq!(find("main"), Some(SyntaxScope::Function));
+        assert_eq!(find("\"hi\""), Some(SyntaxScope::String));
     }
 
     #[test]

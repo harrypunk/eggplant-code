@@ -5,7 +5,26 @@
 //! `App`). Custom theme files (ghostty-style `~/.config/eggplant/themes`)
 //! are planned for M7; the registry is the seam.
 
-use ratatui::style::Color;
+use ratatui::style::{Color, Style};
+
+use eggplant_core::SyntaxScope;
+
+/// Colors for syntax highlight scopes (the backend's vocabulary).
+/// `comment` reuses the top-level `comment` slot — one muted color.
+#[derive(Debug, Clone, Copy)]
+pub struct SyntaxTheme {
+    pub keyword: Color,
+    pub string: Color,
+    pub function: Color,
+    pub type_: Color,
+    pub constant: Color,
+    pub number: Color,
+    pub variable: Color,
+    pub operator: Color,
+    pub punctuation: Color,
+    pub attribute: Color,
+    pub special: Color,
+}
 
 /// Semantic color slots every component reads from.
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +49,8 @@ pub struct Theme {
     pub info: Color,
     pub warn: Color,
     pub error: Color,
+    /// Syntax highlighting colors.
+    pub syntax: SyntaxTheme,
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color {
@@ -52,6 +73,19 @@ pub const TOKYO_NIGHT: Theme = Theme {
     info: rgb(0x7d, 0xcf, 0xff),
     warn: rgb(0xe0, 0xaf, 0x68),
     error: rgb(0xf7, 0x76, 0x8e),
+    syntax: SyntaxTheme {
+        keyword: rgb(0xbb, 0x9a, 0xf7),
+        string: rgb(0x9e, 0xce, 0x6a),
+        function: rgb(0x7a, 0xa2, 0xf7),
+        type_: rgb(0x2a, 0xc3, 0xde),
+        constant: rgb(0xff, 0x9e, 0x64),
+        number: rgb(0xff, 0x9e, 0x64),
+        variable: rgb(0xc0, 0xca, 0xf5),
+        operator: rgb(0x89, 0xdd, 0xff),
+        punctuation: rgb(0x9a, 0xbd, 0xf5),
+        attribute: rgb(0xe0, 0xaf, 0x68),
+        special: rgb(0x89, 0xdd, 0xff),
+    },
 };
 
 /// The original ad-hoc look: follows the terminal's own palette.
@@ -70,6 +104,19 @@ pub const CLASSIC: Theme = Theme {
     info: Color::Cyan,
     warn: Color::Yellow,
     error: Color::Red,
+    syntax: SyntaxTheme {
+        keyword: Color::Magenta,
+        string: Color::Green,
+        function: Color::Blue,
+        type_: Color::Cyan,
+        constant: Color::Red,
+        number: Color::Red,
+        variable: Color::Reset,
+        operator: Color::Reset,
+        punctuation: Color::DarkGray,
+        attribute: Color::Yellow,
+        special: Color::Cyan,
+    },
 };
 
 /// Built-in themes, in display order.
@@ -92,6 +139,26 @@ impl Theme {
             .map(|i| i + 1)
             .unwrap_or(0);
         BUILTINS[index % BUILTINS.len()]
+    }
+
+    /// Style for a syntax scope (plain text for `None`).
+    pub fn scope_style(&self, scope: Option<SyntaxScope>) -> Style {
+        let color = match scope {
+            Some(SyntaxScope::Keyword) => self.syntax.keyword,
+            Some(SyntaxScope::String) => self.syntax.string,
+            Some(SyntaxScope::Comment) => self.comment,
+            Some(SyntaxScope::Function) => self.syntax.function,
+            Some(SyntaxScope::Type) => self.syntax.type_,
+            Some(SyntaxScope::Constant) => self.syntax.constant,
+            Some(SyntaxScope::Number) => self.syntax.number,
+            Some(SyntaxScope::Variable) => self.syntax.variable,
+            Some(SyntaxScope::Operator) => self.syntax.operator,
+            Some(SyntaxScope::Punctuation) => self.syntax.punctuation,
+            Some(SyntaxScope::Attribute) => self.syntax.attribute,
+            Some(SyntaxScope::Special) => self.syntax.special,
+            None => self.fg,
+        };
+        Style::default().fg(color)
     }
 }
 

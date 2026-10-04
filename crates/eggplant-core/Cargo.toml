@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 helix-core.workspace = true
 helix-view.workspace = true
+helix-loader.workspace = true
 arc-swap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true

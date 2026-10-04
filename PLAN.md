@@ -73,8 +73,12 @@ A custom, AI-native terminal editor with an opinionated UI layout.
    that the UI talks to, so helix-core can be replaced later.
 4. **Keymaps**: helix/vim-style; v1 reuses/adapts helix's TOML keymap system — check how
    much of it lives in helix-term vs helix-view, and how separable it is from their UI.
-5. **Runtime assets**: helix runtime dir (themes, tree-sitter queries, languages.toml) — how
-   do we load/locate them (XDG, vendored, $EGGPLANT_RUNTIME)?
+5. **Runtime assets**: ✅ resolved (M6) — language support is config-driven via
+   helix-core's `syntax::Loader`: `languages.toml` (user config merged over helix's embedded
+   default), queries and grammar `.so`s discovered from helix runtime dirs
+   (`~/.config/helix/runtime`, `$HELIX_RUNTIME`, exe-sibling). Nothing vendored or compiled
+   in; new languages need zero code changes. Our only baked-in piece is the 12-scope
+   highlight vocabulary registered via `Loader::set_scopes` (themes color those slots).
 6. **LSP**: reuse `helix-lsp` in v1 or defer?
 
 ## Milestones (draft)
@@ -114,9 +118,12 @@ A custom, AI-native terminal editor with an opinionated UI layout.
           buffers, …). Builds the keymap-tree infra M7 sequences (`gg`) will reuse.
         - remove the `:` command line + ex table entirely (duplicate of the above;
           fs ops like `:e`/`:ls` are covered by the explorer and later grep).
-- [ ] **M6 — Syntax highlighting**: tree-sitter via helix-core; highlight styles read the
-      theme's semantic slots (theme system landed first for this reason — `theme.rs`,
-      built-ins tokyo-night/classic, `:theme <name>`).
+- [x] **M6 — Syntax highlighting** ✅ — tree-sitter via helix-core's config-driven
+      `syntax::Loader` (runtime-dir queries + dynamic grammars; user `languages.toml` merge);
+      `Document::detect_language` on open + incremental reparse on edit; facade exposes
+      per-line `HighlightedSpan`s over a 12-scope `SyntaxScope` vocabulary
+      (`Loader::set_scopes`, longest-prefix); theme `syntax` slots (tokyo-night palette +
+      classic) color them. No grammars/queries baked into the binary.
 - [ ] **M7 — Editing UX**: undo/redo (`u`/`U`), delete/yank/paste with textobjects
       (`dw`, `yy`, `p`), visual mode (`v`), key sequences (`gg`, `ge` — keymap-tree infra
       lands in M5 via which-key), search (`/`), horizontal scroll or soft-wrap (long lines

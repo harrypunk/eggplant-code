@@ -256,9 +256,9 @@ impl Layer for EditorSurface {
         }
         editor::view(
             &EditorProps {
-                lines: app
-                    .editor
-                    .lines(self.scroll..self.scroll + area.height as usize),
+                lines: (self.scroll..self.scroll + area.height as usize)
+                    .map(|line| app.editor.highlighted_line(line))
+                    .collect(),
                 scroll: self.scroll,
                 line_count: app.editor.line_count(),
                 cursor: app.editor.cursor(),

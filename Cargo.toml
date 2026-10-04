@@ -19,6 +19,7 @@ crossterm = "0.29"
 # git deps are required — pinned to a rev on the LAN mirror for reproducibility.
 helix-core = { git = "http://git.z.lan/fork/helix", rev = "079a789e8cb08ead67f19e1971a1b7438b37354b" }
 helix-view = { git = "http://git.z.lan/fork/helix", rev = "079a789e8cb08ead67f19e1971a1b7438b37354b" }
+helix-loader = { git = "http://git.z.lan/fork/helix", rev = "079a789e8cb08ead67f19e1971a1b7438b37354b" }
 
 # Third-party
 arc-swap = "1"

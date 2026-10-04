@@ -1,5 +1,6 @@
 //! The editor text area: gutter + document lines + cursor.
 
+use eggplant_core::HighlightedSpan;
 use ratatui::layout::{Constraint, Direction, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -9,8 +10,8 @@ use crate::theme::Theme;
 
 /// Everything the editor view needs — nothing more.
 pub struct EditorProps {
-    /// Visible document lines (already sliced to the viewport).
-    pub lines: Vec<String>,
+    /// Visible document lines as highlighted spans (sliced to the viewport).
+    pub lines: Vec<Vec<HighlightedSpan>>,
     /// First visible line, 0-based (gutter numbering base).
     pub scroll: usize,
     /// Total document lines (drives gutter width).
@@ -37,7 +38,18 @@ pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
             ))
         })
         .collect();
-    let text: Vec<Line> = props.lines.iter().cloned().map(Line::from).collect();
+    let text: Vec<Line> = props
+        .lines
+        .iter()
+        .map(|spans| {
+            Line::from(
+                spans
+                    .iter()
+                    .map(|span| Span::styled(span.text.clone(), theme.scope_style(span.scope)))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
 
     // Terminal cursor tracks the editor cursor (char-col ≈ display col for now).
     let cursor_x = area.x + gutter_width + cursor_col as u16;

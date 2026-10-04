@@ -5,9 +5,11 @@
 //! without touching the UI.
 
 pub mod editor;
+pub mod highlight;
 pub mod mode;
 
-pub use editor::Editor;
+pub use editor::{BufferInfo, Editor};
+pub use highlight::{HighlightedSpan, SyntaxScope};
 pub use mode::Mode;
 
 /// Re-export of the v1 backend so the rest of the workspace never depends
