@@ -7,7 +7,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::App;
-use crate::compositor::Compositor;
+use crate::compositor::{Compositor, FocusDirection};
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::notification::Notification;
@@ -110,9 +110,14 @@ pub fn default_registry() -> Registry {
             execute: toggle_files_panel,
         },
         Command {
-            id: "focus.next",
-            description: "Focus next layer",
-            execute: focus_next,
+            id: "window.focus-left",
+            description: "Focus window to the left",
+            execute: focus_left,
+        },
+        Command {
+            id: "window.focus-right",
+            description: "Focus window to the right",
+            execute: focus_right,
         },
         Command {
             id: "buffer.next",
@@ -140,9 +145,10 @@ pub fn default_registry() -> Registry {
         (KeyStroke::ctrl('q'), 0),   // app.quit
         (KeyStroke::ctrl('s'), 2),   // file.save
         (KeyStroke::ctrl('e'), 3),   // panel.files.toggle
-        (KeyStroke::ctrl('w'), 4),   // focus.next
-        (KeyStroke::function(2), 7), // demo.dialog
-        (KeyStroke::function(3), 8), // demo.notification
+        (KeyStroke::ctrl('h'), 4),   // window.focus-left
+        (KeyStroke::ctrl('l'), 5),   // window.focus-right
+        (KeyStroke::function(2), 8), // demo.dialog
+        (KeyStroke::function(3), 9), // demo.notification
     ];
     Registry::new(commands, keymap)
 }
@@ -188,8 +194,12 @@ fn toggle_files_panel(app: &mut App, compositor: &mut Compositor) {
     }
 }
 
-fn focus_next(_: &mut App, compositor: &mut Compositor) {
-    compositor.focus_next();
+fn focus_left(_: &mut App, compositor: &mut Compositor) {
+    compositor.focus_direction(FocusDirection::Left);
+}
+
+fn focus_right(_: &mut App, compositor: &mut Compositor) {
+    compositor.focus_direction(FocusDirection::Right);
 }
 
 fn toggle_demo_dialog(_: &mut App, compositor: &mut Compositor) {

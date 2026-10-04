@@ -30,7 +30,7 @@ cargo run -- .              # open a directory: scratch + file explorer (netrw-s
 | `:` | command line (`w` `q` `wq` `q!` `e` `b` `bd` `bn` `bp` `ls` `theme`) |
 | `Space` | command palette (fuzzy) |
 | `C-e` | toggle file explorer |
-| `C-w` | cycle focus (editor ↔ panels) |
+| `C-h` / `C-l` | move window focus left / right (editor ↔ explorer) |
 | `C-s` | save |
 | `C-q` / `C-c` | quit (confirm on unsaved) / force-quit |
 

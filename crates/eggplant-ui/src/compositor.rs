@@ -4,7 +4,9 @@
 //! - `LayerKind::Panel { side, size }` docks against the body area, shrinking the base.
 //! - `LayerKind::Float` overlays the body area (positions itself, e.g. centered).
 //! - The bottom row is global chrome: the statusline (not a layer).
-//! - Key focus defaults to the topmost focusable layer; `focus_next` cycles.
+//! - Windows are equals (neovim-style): focus moves directionally (`C-h`/`C-l`),
+//!   never cycles. Floats are modal: while one is open it holds key focus, and
+//!   closing it returns focus to the previously focused window.
 
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
@@ -137,11 +139,20 @@ pub fn compute_layout(kinds: &[LayerKind], area: Rect) -> LayoutSolution {
     }
 }
 
+/// Direction for `Compositor::focus_direction`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusDirection {
+    Left,
+    Right,
+}
+
 #[derive(Default)]
 pub struct Compositor {
     layers: Vec<Box<dyn Layer>>,
-    /// Explicit focus (index into `layers`); `None` = topmost focusable.
-    focus: Option<usize>,
+    /// Focused window (index into `layers`); 0 = the base editor window.
+    window_focus: usize,
+    /// Focused float while one is open (floats are modal).
+    float_focus: Option<usize>,
 }
 
 impl Compositor {
@@ -151,19 +162,36 @@ impl Compositor {
 
     pub fn push(&mut self, layer: Box<dyn Layer>) {
         let focusable = layer.focusable();
+        let is_float = matches!(layer.kind(), LayerKind::Float);
         self.layers.push(layer);
-        if focusable {
-            self.focus = Some(self.layers.len() - 1);
+        if !focusable {
+            return;
+        }
+        let index = self.layers.len() - 1;
+        if is_float {
+            self.float_focus = Some(index);
+        } else {
+            self.window_focus = index;
         }
     }
 
-    /// Remove the layer at `index` (never the base layer).
+    /// Remove the layer at `index` (never the base layer). Focus falls back
+    /// to the base window / no float; stored indices shift down past `index`.
     pub fn remove(&mut self, index: usize) {
         if index == 0 || index >= self.layers.len() {
             return;
         }
         self.layers.remove(index);
-        self.focus = None; // fall back to topmost focusable
+        if self.window_focus == index {
+            self.window_focus = 0;
+        } else if self.window_focus > index {
+            self.window_focus -= 1;
+        }
+        match self.float_focus {
+            Some(f) if f == index => self.float_focus = None,
+            Some(f) if f > index => self.float_focus = Some(f - 1),
+            _ => {}
+        }
     }
 
     pub fn remove_by_id(&mut self, id: &str) {
@@ -180,42 +208,59 @@ impl Compositor {
         self.find(id).is_some()
     }
 
-    /// Index of the layer that currently holds key focus.
+    /// Index of the layer that currently holds key focus: the modal float
+    /// while one is open, else the focused window.
     pub fn focused_index(&self) -> usize {
-        let valid = self
-            .focus
-            .filter(|&i| self.layers.get(i).is_some_and(|l| l.focusable()));
-        valid.unwrap_or_else(|| {
-            self.layers
-                .iter()
-                .rposition(|layer| layer.focusable())
-                .unwrap_or(0)
-        })
-    }
-
-    /// Cycle focus through focusable layers (`Ctrl-W`).
-    pub fn focus_next(&mut self) {
-        let focusable: Vec<usize> = self
-            .layers
-            .iter()
-            .enumerate()
-            .filter_map(|(i, layer)| layer.focusable().then_some(i))
-            .collect();
-        if focusable.len() < 2 {
-            return;
+        if let Some(f) = self
+            .float_focus
+            .filter(|&f| self.layers.get(f).is_some_and(|l| l.focusable()))
+        {
+            return f;
         }
-        let current = self.focused_index();
-        let next = focusable
-            .iter()
-            .cycle()
-            .find(|&&i| i > current)
-            .unwrap_or(&focusable[0]);
-        self.focus = Some(*next);
+        self.window_focus.min(self.layers.len().saturating_sub(1))
     }
 
-    /// Move focus back to the base layer.
+    /// Window indices in visual left→right order: left panels, base, right
+    /// panels (matches `compute_layout`'s docking order).
+    fn window_order(&self) -> Vec<usize> {
+        let mut left = Vec::new();
+        let mut base = None;
+        let mut right = Vec::new();
+        for (i, layer) in self.layers.iter().enumerate() {
+            match layer.kind() {
+                LayerKind::Base => base = Some(i),
+                LayerKind::Panel {
+                    side: Side::Left, ..
+                } => left.push(i),
+                LayerKind::Panel {
+                    side: Side::Right, ..
+                } => right.push(i),
+                LayerKind::Float => {}
+            }
+        }
+        left.extend(base);
+        left.extend(right);
+        left
+    }
+
+    /// Move window focus left/right (`C-h`/`C-l`). No-op at the edges.
+    pub fn focus_direction(&mut self, direction: FocusDirection) {
+        let order = self.window_order();
+        let Some(pos) = order.iter().position(|&i| i == self.window_focus) else {
+            return;
+        };
+        let next = match direction {
+            FocusDirection::Left => pos.checked_sub(1),
+            FocusDirection::Right => (pos + 1 < order.len()).then_some(pos + 1),
+        };
+        if let Some(next) = next {
+            self.window_focus = order[next];
+        }
+    }
+
+    /// Move focus back to the base editor window.
     pub fn unfocus(&mut self) {
-        self.focus = Some(0);
+        self.window_focus = 0;
     }
 
     /// Send a key to the focused layer, applying any structural request or
@@ -299,6 +344,88 @@ impl Compositor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Minimal stub layer for focus/layout tests.
+    struct Stub {
+        kind: LayerKind,
+        id: &'static str,
+    }
+
+    impl Layer for Stub {
+        fn view(&self, _area: Rect, _app: &App, _focused: bool) -> Element {
+            Element::Empty
+        }
+
+        fn kind(&self) -> LayerKind {
+            self.kind
+        }
+
+        fn id(&self) -> &'static str {
+            self.id
+        }
+    }
+
+    fn window(side: Side) -> Stub {
+        Stub {
+            kind: LayerKind::Panel { side, size: 10 },
+            id: "panel",
+        }
+    }
+
+    fn float() -> Stub {
+        Stub {
+            kind: LayerKind::Float,
+            id: "float",
+        }
+    }
+
+    fn compositor_with_base() -> Compositor {
+        let mut compositor = Compositor::new();
+        compositor.push(Box::new(Stub {
+            kind: LayerKind::Base,
+            id: "editor",
+        }));
+        compositor
+    }
+
+    #[test]
+    fn windows_are_focused_on_push_and_floats_are_modal() {
+        let mut c = compositor_with_base();
+        assert_eq!(c.focused_index(), 0);
+
+        c.push(Box::new(window(Side::Left))); // panel takes window focus
+        assert_eq!(c.focused_index(), 1);
+
+        c.push(Box::new(float())); // float is modal
+        assert_eq!(c.focused_index(), 2);
+
+        c.remove(2); // closing the float restores the window focus
+        assert_eq!(c.focused_index(), 1);
+    }
+
+    #[test]
+    fn directional_focus_walks_left_to_right_and_stops_at_edges() {
+        let mut c = compositor_with_base();
+        c.push(Box::new(window(Side::Left))); // order: panel(1), editor(0)
+
+        c.focus_direction(FocusDirection::Right); // panel → editor
+        assert_eq!(c.focused_index(), 0);
+        c.focus_direction(FocusDirection::Right); // right edge: no-op
+        assert_eq!(c.focused_index(), 0);
+        c.focus_direction(FocusDirection::Left); // editor → panel
+        assert_eq!(c.focused_index(), 1);
+        c.focus_direction(FocusDirection::Left); // left edge: no-op
+        assert_eq!(c.focused_index(), 1);
+    }
+
+    #[test]
+    fn removing_the_focused_window_falls_back_to_base() {
+        let mut c = compositor_with_base();
+        c.push(Box::new(window(Side::Left)));
+        assert_eq!(c.focused_index(), 1);
+        c.remove(1);
+        assert_eq!(c.focused_index(), 0);
+    }
 
     fn area() -> Rect {
         Rect::new(0, 0, 100, 30)
