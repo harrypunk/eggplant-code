@@ -88,7 +88,8 @@ A custom, AI-native terminal editor with an opinionated UI layout.
       queue; opinionated layout (statusline, gutter, etc.).
       (LayerKind Base/Panel/Float drives pure `compute_layout`; focus: push→focus, `C-w` cycle,
       Esc→Unfocus vs Close; statusline extracted to global chrome; files panel `C-e`;
-      confirm-quit dialog `C-q`; notification queue cap 5 + "+N more")
+      confirm-quit dialog `C-q`; notification queue cap 5 + "+N more";
+      `eggplant <dir>` opens the files panel netrw-style, clap CLI)
 - [x] **M3 — Keymaps/commands**: modal keys, command palette, save/quit, buffers.
       (decision: own keymap tables, NOT helix's TOML system — lives in helix-term, coupled to
       its command enum. Registry: commands defined once, keymap references by index.

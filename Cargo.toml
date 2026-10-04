@@ -21,4 +21,5 @@ helix-view = { git = "http://git.z.lan/fork/helix" }
 # Third-party
 arc-swap = "1"
 anyhow = "1"
+clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt", "fs"] }
