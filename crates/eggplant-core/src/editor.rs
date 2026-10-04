@@ -69,6 +69,18 @@ struct Buffer {
     edits_since_save: usize,
 }
 
+/// Display path relative to the working directory (editor chrome style);
+/// falls back to the full path for files outside it.
+fn relative_display(path: &std::path::Path) -> String {
+    let Ok(cwd) = std::env::current_dir() else {
+        return path.display().to_string();
+    };
+    path.strip_prefix(&cwd)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
 impl Buffer {
     fn new(doc: Document) -> Self {
         Self {
@@ -80,18 +92,20 @@ impl Buffer {
     fn display_name(&self) -> String {
         self.doc
             .path()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|| "[scratch]".to_owned())
+            .map(relative_display)
+            .unwrap_or_else(|| "untitled".to_owned())
     }
 }
 
-/// Read-only buffer summary for UIs (statusline, `:ls`, pickers).
+/// Read-only buffer summary for UIs (topbar, pickers).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BufferInfo {
     pub index: usize,
     pub name: String,
     pub modified: bool,
     pub current: bool,
+    /// Scratch buffers have no backing file.
+    pub scratch: bool,
 }
 
 pub struct Editor {
@@ -214,6 +228,7 @@ impl Editor {
                 name: b.display_name(),
                 modified: b.edits_since_save > 0,
                 current: index == self.current,
+                scratch: b.doc.path().is_none(),
             })
             .collect()
     }
@@ -588,15 +603,31 @@ impl Editor {
     pub fn display_name(&self) -> String {
         self.doc()
             .path()
-            .and_then(|p| p.file_name())
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "[scratch]".to_owned())
+            .map(relative_display)
+            .unwrap_or_else(|| "untitled".to_owned())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relative_display_strips_cwd() {
+        let cwd = std::env::current_dir().unwrap();
+        let inside = cwd.join("src/editor.rs");
+        assert_eq!(relative_display(&inside), "src/editor.rs");
+        // Outside the cwd: full path.
+        assert_eq!(
+            relative_display(std::path::Path::new("/elsewhere/f.rs")),
+            "/elsewhere/f.rs"
+        );
+        // Already relative: as-is.
+        assert_eq!(
+            relative_display(std::path::Path::new("README.md")),
+            "README.md"
+        );
+    }
 
     fn text_of(editor: &Editor) -> String {
         editor.lines(0..editor.line_count()).join("\n")

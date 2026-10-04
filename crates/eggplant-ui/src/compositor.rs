@@ -96,18 +96,18 @@ pub struct LayoutSolution {
 }
 
 /// Pure layout: derive every layer's area from the layer kinds.
-/// Chrome: topbar on the first row, statusline on the last. Panels dock in
-/// z-order; the base fills the remainder; floats get the body.
+///
+/// Chrome: statusline on the last row; the buffer topbar sits on the first
+/// row *above the editor window only* (panels span the full height beside
+/// it — the vscode layout). Panels dock in z-order; the base fills the
+/// remainder minus the topbar row; floats get the whole main area.
 pub fn compute_layout(kinds: &[LayerKind], area: Rect) -> LayoutSolution {
-    let [topbar, body, statusline] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let [main, statusline] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
 
-    let mut remaining = body;
-    let mut layer_areas = vec![body; kinds.len()];
+    let mut remaining = main;
+    let mut layer_areas = vec![main; kinds.len()];
+    let mut topbar = Rect { height: 1, ..main };
 
     for (i, kind) in kinds.iter().enumerate() {
         if let LayerKind::Panel { side, size } = *kind {
@@ -132,8 +132,19 @@ pub fn compute_layout(kinds: &[LayerKind], area: Rect) -> LayoutSolution {
 
     for (i, kind) in kinds.iter().enumerate() {
         match kind {
-            LayerKind::Base => layer_areas[i] = remaining,
-            LayerKind::Float => layer_areas[i] = body,
+            LayerKind::Base => {
+                // Topbar aligns with the base window's left border.
+                topbar = Rect {
+                    height: 1,
+                    ..remaining
+                };
+                layer_areas[i] = Rect {
+                    y: remaining.y + 1,
+                    height: remaining.height.saturating_sub(1),
+                    ..remaining
+                };
+            }
+            LayerKind::Float => layer_areas[i] = main,
             LayerKind::Panel { .. } => {}
         }
     }
@@ -459,8 +470,9 @@ mod tests {
         // Mode pill " NORMAL " on the last row (y=4), not the first.
         assert_eq!(buffer[(1, 4)].symbol(), "N");
         assert_ne!(buffer[(1, 0)].symbol(), "N");
-        // Buffer topbar on the first row: " [scratch] " tab starts at x=1.
-        assert_eq!(buffer[(1, 0)].symbol(), "[");
+        // Buffer topbar on the first row: the sole scratch buffer shows as
+        // " untitled " starting at x=1.
+        assert_eq!(buffer[(1, 0)].symbol(), "u");
     }
 
     #[test]
@@ -472,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn left_panel_docks_and_shrinks_base() {
+    fn left_panel_spans_full_height_and_topbar_aligns_to_base() {
         let kinds = [
             LayerKind::Base,
             LayerKind::Panel {
@@ -481,7 +493,10 @@ mod tests {
             },
         ];
         let solution = compute_layout(&kinds, area());
-        assert_eq!(solution.layer_areas[1], Rect::new(0, 1, 30, 28));
+        // Panel spans the full main height (y=0), like vscode's sidebar.
+        assert_eq!(solution.layer_areas[1], Rect::new(0, 0, 30, 29));
+        // Topbar starts at the editor window's left border (x=30).
+        assert_eq!(solution.topbar, Rect::new(30, 0, 70, 1));
         assert_eq!(solution.layer_areas[0], Rect::new(30, 1, 70, 28));
     }
 
@@ -499,13 +514,14 @@ mod tests {
             },
         ];
         let solution = compute_layout(&kinds, area());
-        assert_eq!(solution.layer_areas[1], Rect::new(0, 1, 30, 28));
-        assert_eq!(solution.layer_areas[2], Rect::new(80, 1, 20, 28));
+        assert_eq!(solution.layer_areas[1], Rect::new(0, 0, 30, 29));
+        assert_eq!(solution.layer_areas[2], Rect::new(80, 0, 20, 29));
         assert_eq!(solution.layer_areas[0], Rect::new(30, 1, 50, 28));
+        assert_eq!(solution.topbar, Rect::new(30, 0, 50, 1));
     }
 
     #[test]
-    fn float_overlays_full_body() {
+    fn float_overlays_full_main_area() {
         let kinds = [
             LayerKind::Base,
             LayerKind::Panel {
@@ -515,7 +531,7 @@ mod tests {
             LayerKind::Float,
         ];
         let solution = compute_layout(&kinds, area());
-        assert_eq!(solution.layer_areas[2], Rect::new(0, 1, 100, 28));
+        assert_eq!(solution.layer_areas[2], Rect::new(0, 0, 100, 29));
         assert_eq!(solution.layer_areas[0], Rect::new(30, 1, 70, 28));
     }
 }
