@@ -1,11 +1,12 @@
 //! Notification toasts — stacked top-right, above all layers.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 
 use crate::element::Element;
 use crate::layers::notification::Level;
+use crate::theme::Theme;
 
 const WIDTH: u16 = 40;
 const HEIGHT: u16 = 3;
@@ -19,16 +20,15 @@ pub struct ToastProps {
     pub level: Level,
 }
 
-fn border_style(level: Level) -> Style {
-    let color = match level {
-        Level::Info => Color::Cyan,
-        Level::Warn => Color::Yellow,
-        Level::Error => Color::Red,
-    };
-    Style::default().fg(color).add_modifier(Modifier::BOLD)
+fn level_color(level: Level, theme: &Theme) -> ratatui::style::Color {
+    match level {
+        Level::Info => theme.info,
+        Level::Warn => theme.warn,
+        Level::Error => theme.error,
+    }
 }
 
-pub fn view(toasts: &[ToastProps], area: Rect) -> Element {
+pub fn view(toasts: &[ToastProps], area: Rect, theme: &Theme) -> Element {
     let hidden = toasts.len().saturating_sub(MAX_VISIBLE);
     let mut children: Vec<Element> = Vec::new();
 
@@ -42,7 +42,7 @@ pub fn view(toasts: &[ToastProps], area: Rect) -> Element {
             ),
             Element::Text {
                 lines: vec![Line::from(format!("+{hidden} earlier"))],
-                style: Style::default().fg(Color::DarkGray),
+                style: Style::default().fg(theme.comment),
                 wrap: false,
             },
         ));
@@ -66,8 +66,10 @@ pub fn view(toasts: &[ToastProps], area: Rect) -> Element {
                 rect,
                 Element::cleared(Element::Bordered {
                     title: None,
-                    border_style: border_style(toast.level),
-                    style: Style::default().bg(Color::Black),
+                    border_style: Style::default()
+                        .fg(level_color(toast.level, theme))
+                        .add_modifier(Modifier::BOLD),
+                    style: Style::default().fg(theme.fg).bg(theme.surface),
                     child: Box::new(Element::text(vec![Line::from(toast.message.clone())])),
                 }),
             )

@@ -1,10 +1,11 @@
 //! The file-explorer panel: titled border + entry list with selection.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
+use crate::theme::Theme;
 
 /// One panel entry, projected for display.
 pub struct EntryProps {
@@ -24,11 +25,11 @@ pub struct FilesPanelProps {
     pub focused: bool,
 }
 
-pub fn view(props: &FilesPanelProps, _area: Rect) -> Element {
+pub fn view(props: &FilesPanelProps, _area: Rect, theme: &Theme) -> Element {
     let border_style = if props.focused {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme.accent)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme.comment)
     };
 
     let rows: Vec<Line> = props
@@ -43,20 +44,22 @@ pub fn view(props: &FilesPanelProps, _area: Rect) -> Element {
             };
             let style = if i == props.selected_in_view {
                 Style::default()
-                    .bg(Color::DarkGray)
+                    .fg(theme.fg)
+                    .bg(theme.selection)
                     .add_modifier(Modifier::BOLD)
             } else if entry.is_dir {
-                Style::default().fg(Color::Cyan)
+                Style::default().fg(theme.info)
             } else {
-                Style::default()
+                Style::default().fg(theme.fg)
             };
             Line::from(Span::styled(label, style))
         })
         .collect();
 
-    Element::cleared(Element::bordered(
-        format!(" {} ", props.title),
+    Element::cleared(Element::Bordered {
+        title: Some(Line::from(format!(" {} ", props.title))),
         border_style,
-        Element::text(rows),
-    ))
+        style: Style::default().fg(theme.fg).bg(theme.surface),
+        child: Box::new(Element::text(rows)),
+    })
 }

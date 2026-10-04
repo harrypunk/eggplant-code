@@ -126,7 +126,7 @@ impl FilesPanel {
 }
 
 impl Layer for FilesPanel {
-    fn view(&self, area: Rect, _app: &App, focused: bool) -> Element {
+    fn view(&self, area: Rect, app: &App, focused: bool) -> Element {
         files_panel::view(
             &FilesPanelProps {
                 title: self.dir.display().to_string(),
@@ -143,6 +143,7 @@ impl Layer for FilesPanel {
                 focused,
             },
             area,
+            &app.theme,
         )
     }
 

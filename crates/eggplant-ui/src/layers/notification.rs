@@ -7,6 +7,7 @@ use ratatui::layout::Rect;
 
 use crate::components::toasts::{self, ToastProps};
 use crate::element::Element;
+use crate::theme::Theme;
 
 const TTL: Duration = Duration::from_secs(4);
 
@@ -68,7 +69,7 @@ impl Notifications {
     }
 
     /// Project visible notifications into the pure toast component.
-    pub fn view(&self, area: Rect) -> Element {
+    pub fn view(&self, area: Rect, theme: &Theme) -> Element {
         let toasts: Vec<ToastProps> = self
             .items
             .iter()
@@ -78,6 +79,6 @@ impl Notifications {
                 level: n.level,
             })
             .collect();
-        toasts::view(&toasts, area)
+        toasts::view(&toasts, area, theme)
     }
 }

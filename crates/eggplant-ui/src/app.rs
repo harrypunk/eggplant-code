@@ -4,6 +4,7 @@ use eggplant_core::Editor;
 
 use crate::commands::{self, Registry};
 use crate::layers::notification::Notifications;
+use crate::theme::Theme;
 
 /// Application lifecycle status. Not a `bool`: quitting is a state
 /// transition, and this is where future states land (e.g. quit reasons,
@@ -22,6 +23,8 @@ pub struct App {
     pub notifications: Notifications,
     /// The command registry: global keymap + palette contents.
     pub registry: Registry,
+    /// Active color theme (components read it via props adapters).
+    pub theme: Theme,
     lifecycle: Lifecycle,
     /// Demo counter for the `F3` notification-spam key (until real producers exist).
     pub tick_count: u32,
@@ -33,6 +36,7 @@ impl App {
             editor,
             notifications: Notifications::new(),
             registry: commands::default_registry(),
+            theme: Theme::default(),
             lifecycle: Lifecycle::Running,
             tick_count: 0,
         }

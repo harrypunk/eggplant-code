@@ -24,8 +24,8 @@ impl Dialog {
 }
 
 impl Layer for Dialog {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
-        dialog::dialog_view(&self.title, &self.body, area)
+    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
+        dialog::dialog_view(&self.title, &self.body, area, &app.theme)
     }
 
     fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {
@@ -71,8 +71,8 @@ impl ConfirmDialog {
 }
 
 impl Layer for ConfirmDialog {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
-        dialog::confirm_view(&self.title, &self.message, area)
+    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
+        dialog::confirm_view(&self.title, &self.message, area, &app.theme)
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {

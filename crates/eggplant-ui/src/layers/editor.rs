@@ -268,6 +268,7 @@ impl Layer for EditorSurface {
                 cursor: app.editor.cursor(),
             },
             area,
+            &app.theme,
         )
     }
 

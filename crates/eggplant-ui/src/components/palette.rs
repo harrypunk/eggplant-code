@@ -1,10 +1,11 @@
 //! The command palette: input row + filtered command list, hugging the top.
 
 use ratatui::layout::{Constraint, Direction, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
+use crate::theme::Theme;
 
 /// One command, projected for display (pre-filtered by the container).
 pub struct PaletteItem {
@@ -22,7 +23,7 @@ pub struct PaletteProps {
 /// Display cap; the container pre-filters, this caps the rendered rows.
 pub const MAX_ROWS: u16 = 8;
 
-pub fn view(props: &PaletteProps, area: Rect) -> Element {
+pub fn view(props: &PaletteProps, area: Rect, theme: &Theme) -> Element {
     // Centered horizontally, hugging the top of the body area.
     let width = (area.width * 3 / 5).max(30).min(area.width);
     let height = (MAX_ROWS + 3).min(area.height); // input + rows + borders
@@ -34,8 +35,8 @@ pub fn view(props: &PaletteProps, area: Rect) -> Element {
     };
 
     let input_row = Line::from(vec![
-        Span::styled("> ", Style::default().fg(Color::Cyan)),
-        Span::raw(props.input.to_owned()),
+        Span::styled("> ", Style::default().fg(theme.accent)),
+        Span::raw(props.input.clone()),
     ]);
     // Cursor after the input, clamped inside the border.
     let cursor_x =
@@ -46,16 +47,24 @@ pub fn view(props: &PaletteProps, area: Rect) -> Element {
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let style = if i == props.selected {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
+            // Contrast-safe on both plain and selected rows.
+            let (id_style, desc_style) = if i == props.selected {
+                (
+                    Style::default()
+                        .fg(theme.fg)
+                        .bg(theme.selection)
+                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme.fg).bg(theme.selection),
+                )
             } else {
-                Style::default()
+                (
+                    Style::default().fg(theme.fg),
+                    Style::default().fg(theme.comment),
+                )
             };
             Line::from(vec![
-                Span::styled(format!(" {:<20}", item.id), style),
-                Span::styled(item.description, style.fg(Color::Gray)),
+                Span::styled(format!(" {:<20}", item.id), id_style),
+                Span::styled(item.description, desc_style),
             ])
         })
         .collect();
@@ -65,8 +74,8 @@ pub fn view(props: &PaletteProps, area: Rect) -> Element {
         Element::cleared(Element::Stack(vec![
             Element::Bordered {
                 title: Some(Line::from(" palette ")),
-                border_style: Style::default(),
-                style: Style::default().bg(Color::Black),
+                border_style: Style::default().fg(theme.accent),
+                style: Style::default().fg(theme.fg).bg(theme.surface),
                 child: Box::new(Element::Layout {
                     direction: Direction::Vertical,
                     constraints: vec![Constraint::Length(1), Constraint::Min(1)],
@@ -76,4 +85,39 @@ pub fn view(props: &PaletteProps, area: Rect) -> Element {
             Element::cursor(cursor_x, frame_area.y + 1),
         ])),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn selected_row_is_contrast_safe() {
+        // Regression: selected description used to be Gray on DarkGray.
+        let theme = Theme::default();
+        let props = PaletteProps {
+            input: String::new(),
+            items: vec![PaletteItem {
+                id: "app.quit",
+                description: "Quit",
+            }],
+            selected: 0,
+        };
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::element::paint(frame, view(&props, area, &theme), area);
+            })
+            .unwrap();
+        // Palette: width 36 centered in 60 → x=12; border → inner x=13.
+        // Row 0 is at y=3 (frame y=1, border, input row); the description
+        // starts after " {:<20}" → x=13+21=34.
+        let cell = &terminal.backend().buffer()[(34, 3)];
+        assert_eq!(cell.bg, theme.selection);
+        assert_eq!(cell.fg, theme.fg);
+    }
 }

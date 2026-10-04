@@ -47,7 +47,7 @@ impl Palette {
 }
 
 impl Layer for Palette {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
+    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         let items = self
             .filtered()
             .iter()
@@ -63,6 +63,7 @@ impl Layer for Palette {
                 selected: self.selected,
             },
             area,
+            &app.theme,
         )
     }
 

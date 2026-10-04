@@ -7,6 +7,7 @@ use crate::app::App;
 use crate::commands;
 use crate::compositor::Compositor;
 use crate::layers::notification::Notification;
+use crate::theme::Theme;
 
 /// A `:` command-line action.
 pub struct ExCommand {
@@ -117,6 +118,26 @@ pub const EX_COMMANDS: &[ExCommand] = &[
         run: |app, _, _, _| {
             app.editor.prev_buffer();
             Ok(())
+        },
+    },
+    ExCommand {
+        name: "theme",
+        aliases: &[],
+        help: "Switch color theme: `:theme <name>`",
+        run: |app, _, args, _| {
+            let name = args.trim();
+            match Theme::by_name(name) {
+                Some(theme) => {
+                    app.theme = theme;
+                    app.notifications
+                        .push(Notification::info(format!("theme: {}", theme.name)));
+                    Ok(())
+                }
+                None => Err(format!(
+                    "unknown theme '{name}' (available: {})",
+                    Theme::available().join(", ")
+                )),
+            }
         },
     },
     ExCommand {

@@ -1,10 +1,11 @@
 //! The editor text area: gutter + document lines + cursor.
 
 use ratatui::layout::{Constraint, Direction, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
+use crate::theme::Theme;
 
 /// Everything the editor view needs — nothing more.
 pub struct EditorProps {
@@ -18,16 +19,17 @@ pub struct EditorProps {
     pub cursor: (usize, usize),
 }
 
-pub fn view(props: &EditorProps, area: Rect) -> Element {
+pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
     let gutter_width = props.line_count.max(1).ilog10() as u16 + 2;
     let (cursor_line, cursor_col) = props.cursor;
+    let base = Style::default().fg(theme.fg).bg(theme.bg);
 
     let gutter: Vec<Line> = (props.scroll..props.scroll + props.lines.len())
         .map(|n| {
             let style = if n == cursor_line {
-                Style::default().fg(Color::Yellow)
+                base.fg(theme.accent_alt)
             } else {
-                Style::default().fg(Color::DarkGray)
+                base.fg(theme.comment)
             };
             Line::from(Span::styled(
                 format!("{:>w$} ", n + 1, w = gutter_width as usize - 1),
@@ -46,11 +48,16 @@ pub fn view(props: &EditorProps, area: Rect) -> Element {
         Element::Empty
     };
 
+    let styled_text = |lines| Element::Text {
+        lines,
+        style: base,
+        wrap: false,
+    };
     Element::Stack(vec![
         Element::Layout {
             direction: Direction::Horizontal,
             constraints: vec![Constraint::Length(gutter_width), Constraint::Min(1)],
-            children: vec![Element::text(gutter), Element::text(text)],
+            children: vec![styled_text(gutter), styled_text(text)],
         },
         cursor,
     ])

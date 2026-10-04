@@ -18,3 +18,4 @@ pub mod runner;
 pub mod startup;
 pub mod statusline;
 pub mod terminal;
+pub mod theme;

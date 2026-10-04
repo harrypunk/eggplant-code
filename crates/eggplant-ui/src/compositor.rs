@@ -283,7 +283,7 @@ impl Compositor {
                 })
                 .chain([
                     statusline::view(app, focused_id, solution.statusline),
-                    app.notifications.view(area),
+                    app.notifications.view(area, &app.theme),
                 ])
                 .collect(),
         );

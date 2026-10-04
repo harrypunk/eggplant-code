@@ -2,10 +2,11 @@
 
 use eggplant_core::Mode;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
+use crate::theme::Theme;
 
 /// Everything the statusline needs — nothing more.
 pub struct StatuslineProps {
@@ -21,10 +22,10 @@ pub struct StatuslineProps {
     pub focused_layer: Option<&'static str>,
 }
 
-pub fn view(props: &StatuslineProps, area: Rect) -> Element {
+pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
     let mode_bg = match props.mode {
-        Mode::Normal => Color::Cyan,
-        Mode::Insert => Color::Green,
+        Mode::Normal => theme.mode_normal,
+        Mode::Insert => theme.mode_insert,
     };
     let modified = if props.modified { " [+]" } else { "" };
     let buffers = if props.buffers.1 > 1 {
@@ -55,19 +56,19 @@ pub fn view(props: &StatuslineProps, area: Rect) -> Element {
         Span::styled(
             format!(" {} ", props.mode),
             Style::default()
-                .fg(Color::Black)
+                .fg(theme.bg)
                 .bg(mode_bg)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(format!(" {}{modified}{buffers}", props.buffer_name)),
-        Span::styled(focus_tag, Style::default().fg(Color::Yellow)),
+        Span::styled(focus_tag, Style::default().fg(theme.accent_alt)),
         Span::raw(" ".repeat(padding)),
         Span::raw(right),
     ]);
 
     Element::Text {
         lines: vec![line],
-        style: Style::default().bg(Color::DarkGray),
+        style: Style::default().fg(theme.fg).bg(theme.statusline),
         wrap: false,
     }
 }

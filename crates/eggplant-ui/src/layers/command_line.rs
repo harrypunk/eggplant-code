@@ -24,8 +24,8 @@ impl CommandLine {
 }
 
 impl Layer for CommandLine {
-    fn view(&self, area: Rect, _app: &App, _focused: bool) -> Element {
-        command_line::view(&self.input, area)
+    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
+        command_line::view(&self.input, area, &app.theme)
     }
 
     fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {
