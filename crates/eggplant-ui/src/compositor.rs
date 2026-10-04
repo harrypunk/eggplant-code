@@ -282,7 +282,12 @@ impl Compositor {
                     )
                 })
                 .chain([
-                    statusline::view(app, focused_id, solution.statusline),
+                    // Components fill their area; positioning is the parent's
+                    // job — wrap chrome in Fixed so it lands in its strip.
+                    Element::fixed(
+                        solution.statusline,
+                        statusline::view(app, focused_id, solution.statusline),
+                    ),
                     app.notifications.view(area, &app.theme),
                 ])
                 .collect(),
@@ -297,6 +302,34 @@ mod tests {
 
     fn area() -> Rect {
         Rect::new(0, 0, 100, 30)
+    }
+
+    #[test]
+    fn statusline_paints_on_the_last_row() {
+        // Regression: an unwrapped statusline Element painted into the full
+        // screen area, landing on row 0 and tinting the whole frame.
+        use eggplant_core::Editor;
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        use crate::layers::editor::EditorSurface;
+
+        let app = App::new(Editor::scratch().unwrap());
+        let mut compositor = Compositor::new();
+        compositor.push(Box::new(EditorSurface::new()));
+
+        let mut terminal = Terminal::new(TestBackend::new(20, 5)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                compositor.render(frame, area, &app);
+            })
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        // Mode pill " NORMAL " on the last row (y=4), not the first.
+        assert_eq!(buffer[(1, 4)].symbol(), "N");
+        assert_ne!(buffer[(1, 0)].symbol(), "N");
     }
 
     #[test]
