@@ -2,6 +2,7 @@ pub mod dialog;
 pub mod editor;
 pub mod files_panel;
 pub mod grep;
+pub mod leap;
 pub mod notification;
 pub mod palette;
 pub mod picker;

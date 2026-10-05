@@ -764,8 +764,18 @@ impl Editor {
             return;
         }
         let (_, col) = self.cursor();
+        self.set_cursor_on_line(self.last_line(), col);
+    }
+
+    /// The last line the cursor may sit on: a file ending in a newline has
+    /// a phantom empty line after the content, which is not a jump target.
+    fn last_line(&self) -> usize {
         let last = self.line_count().saturating_sub(1);
-        self.set_cursor_on_line(last, col);
+        if last > 0 && self.line_char_len(last) == 0 {
+            last - 1
+        } else {
+            last
+        }
     }
 
     /// Go to `line` (0-based, clamped), keeping the column where possible.
@@ -774,7 +784,7 @@ impl Editor {
             return;
         }
         let (_, col) = self.cursor();
-        let target = line.min(self.line_count().saturating_sub(1));
+        let target = line.min(self.last_line());
         self.set_cursor_on_line(target, col);
     }
 
@@ -924,6 +934,37 @@ impl Editor {
         self.doc_opt()
             .map(|doc| doc.text().lines().map(|line| line.to_string()).collect())
             .unwrap_or_default()
+    }
+
+    /// All occurrences of `pattern` as `(line, col)`, in document order.
+    /// Leap-jump's label source (stateless, unlike `search`).
+    pub fn find_matches(&self, pattern: &str) -> Vec<(usize, usize)> {
+        let Some(doc) = self.doc_opt() else {
+            return Vec::new();
+        };
+        if pattern.is_empty() {
+            return Vec::new();
+        }
+        let text = doc.text();
+        let haystack = text.slice(..).to_string();
+        haystack
+            .match_indices(pattern)
+            .map(|(byte, _)| {
+                let ch = text.byte_to_char(byte);
+                let line = text.char_to_line(ch);
+                (line, ch - text.line_to_char(line))
+            })
+            .collect()
+    }
+
+    /// Leap: move the cursor to `(line, col)`, clamped.
+    pub fn jump_to(&mut self, line: usize, col: usize) {
+        if self.current.is_none() {
+            return;
+        }
+        let line = line.min(self.last_line());
+        self.set_cursor_on_line(line, col);
+        self.clamp_cursor_off_line_ending();
     }
 
     /// Search matches intersecting `line` as char columns
@@ -1968,6 +2009,24 @@ mod tests {
             ed.buffer_count()
         );
     }
+    #[test]
+    fn find_matches_returns_line_col_pairs() {
+        let mut ed = editor_with("ab ab\nxab");
+        assert_eq!(ed.find_matches("ab"), vec![(0, 0), (0, 3), (1, 1)]);
+        assert_eq!(ed.find_matches(""), Vec::new());
+        assert_eq!(ed.find_matches("zz"), Vec::new());
+    }
+
+    #[test]
+    fn jump_to_moves_and_clamps() {
+        let mut ed = editor_with("one\ntwo\nthree");
+        ed.jump_to(1, 1);
+        assert_eq!(ed.cursor(), (1, 1));
+        ed.jump_to(99, 99);
+        assert_eq!(ed.cursor().0, 2, "line clamps to the last line");
+        assert!(ed.cursor().1 <= 5, "col clamps into the line");
+    }
+
     #[test]
     fn next_prev_buffer_wraps() {
         let path_a = temp_file("wrap-a", "a");

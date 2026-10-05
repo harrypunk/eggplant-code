@@ -15,12 +15,15 @@ pub struct EditorLine {
     pub spans: Vec<HighlightedSpan>,
     pub selection: Option<(usize, usize)>,
     pub search_marks: Vec<(usize, usize, bool)>,
+    /// Leap labels on this line: `(col, label)` — painted as chips,
+    /// replacing the char under them.
+    pub labels: Vec<(usize, char)>,
 }
 
 /// Build a display line: syntax colors, with search matches and the visual
 /// selection painted as background bands (selection wins over search,
 /// current match over plain matches).
-fn style_line(line: &EditorLine, theme: &Theme) -> Line<'static> {
+fn style_line(line: &EditorLine, dim: bool, theme: &Theme) -> Line<'static> {
     // Flatten to per-char (char, scope) cells, then group consecutive cells
     // with equal style into spans. Visible lines are short — clarity wins.
     let cells: Vec<(char, Option<eggplant_core::SyntaxScope>)> = line
@@ -45,15 +48,32 @@ fn style_line(line: &EditorLine, theme: &Theme) -> Line<'static> {
             })
     };
 
+    let label_style = Style::default()
+        .fg(theme.bg)
+        .bg(theme.accent)
+        .add_modifier(ratatui::style::Modifier::BOLD);
+
     let mut spans: Vec<Span> = Vec::new();
     for (col, (c, scope)) in cells.iter().enumerate() {
-        let mut style = theme.scope_style(*scope);
-        if let Some(bg) = search_bg(col) {
-            style = style.bg(bg);
+        // Leap labels replace the char under them (leap.nvim-style chip).
+        if let Some((_, label)) = line.labels.iter().find(|(label_col, _)| *label_col == col) {
+            spans.push(Span::styled(label.to_string(), label_style));
+            continue;
         }
-        if selected(col) {
-            style = style.bg(theme.selection);
-        }
+        // Leap mode dims all other text; search marks and selection are
+        // superseded.
+        let style = if dim {
+            theme.scope_style(*scope).fg(theme.comment)
+        } else {
+            let mut style = theme.scope_style(*scope);
+            if let Some(bg) = search_bg(col) {
+                style = style.bg(bg);
+            }
+            if selected(col) {
+                style = style.bg(theme.selection);
+            }
+            style
+        };
         match spans.last_mut() {
             Some(last) if last.style == style => last.content.to_mut().push(*c),
             _ => spans.push(Span::styled(c.to_string(), style)),
@@ -72,6 +92,8 @@ pub struct EditorProps {
     pub line_count: usize,
     /// Cursor as (line, col) in document coordinates.
     pub cursor: (usize, usize),
+    /// Dim all text (leap-jump: only the labels stand out).
+    pub dim: bool,
 }
 
 pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
@@ -95,7 +117,7 @@ pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
     let text: Vec<Line> = props
         .lines
         .iter()
-        .map(|line| style_line(line, theme))
+        .map(|line| style_line(line, props.dim, theme))
         .collect();
 
     // Terminal cursor tracks the editor cursor (char-col ≈ display col for now).
@@ -146,10 +168,12 @@ mod tests {
                 ],
                 selection: Some((2, 5)), // covers " m a i" — splits both spans
                 search_marks: Vec::new(),
+                labels: Vec::new(),
             }],
             scroll: 0,
             line_count: 1,
             cursor: (0, 0),
+            dim: false,
         };
         let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
         terminal
@@ -170,6 +194,42 @@ mod tests {
     }
 
     #[test]
+    fn leap_dims_text_and_paints_label_chips() {
+        let theme = Theme::default();
+        let props = EditorProps {
+            lines: vec![EditorLine {
+                spans: vec![HighlightedSpan {
+                    text: "foo foo".to_owned(),
+                    scope: None,
+                }],
+                selection: None,
+                search_marks: Vec::new(),
+                labels: vec![(4, 'a')],
+            }],
+            scroll: 0,
+            line_count: 1,
+            cursor: (0, 0),
+            dim: true,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::element::paint(frame, view(&props, area, &theme), area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let gutter = 2u16;
+        // unlabeled text is dimmed
+        assert_eq!(buffer[(gutter, 0)].fg, theme.comment);
+        // the label chip replaces the char at col 4 ('f' → 'a')
+        let chip = &buffer[(gutter + 4, 0)];
+        assert_eq!(chip.symbol(), "a");
+        assert_eq!(chip.fg, theme.bg);
+        assert_eq!(chip.bg, theme.accent);
+    }
+
+    #[test]
     fn search_marks_paint_backgrounds_current_distinct() {
         let theme = Theme::default();
         let props = EditorProps {
@@ -180,10 +240,12 @@ mod tests {
                 }],
                 selection: None,
                 search_marks: vec![(0, 3, false), (4, 7, true)],
+                labels: Vec::new(),
             }],
             scroll: 0,
             line_count: 1,
             cursor: (0, 4),
+            dim: false,
         };
         let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
         terminal

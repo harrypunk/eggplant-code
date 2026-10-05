@@ -434,6 +434,7 @@ impl Layer for EditorSurface {
         if !app.editor.has_buffer() {
             return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
         }
+        let leap = app.leap.as_ref();
         editor::view(
             &EditorProps {
                 lines: (self.scroll..self.scroll + area.height as usize)
@@ -441,11 +442,22 @@ impl Layer for EditorSurface {
                         spans: app.editor.highlighted_line(line),
                         selection: app.editor.visual_selection_on_line(line),
                         search_marks: app.editor.search_marks_on_line(line),
+                        labels: leap
+                            .map(|leap| {
+                                leap.labels
+                                    .iter()
+                                    .filter(|label| label.line == line)
+                                    .map(|label| (label.col, label.label))
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                     })
                     .collect(),
                 scroll: self.scroll,
                 line_count: app.editor.line_count(),
                 cursor: app.editor.cursor(),
+                // Dim once labels are up (leap's second phase).
+                dim: leap.is_some_and(|leap| !leap.labels.is_empty()),
             },
             area,
             &app.theme,

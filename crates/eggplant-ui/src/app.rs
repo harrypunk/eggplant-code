@@ -18,6 +18,22 @@ pub enum Lifecycle {
     Quitting,
 }
 
+/// A leap-jump target: `label` shown at `(line, col)`; typing it jumps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LeapLabel {
+    pub label: char,
+    pub line: usize,
+    pub col: usize,
+}
+
+/// Leap-jump state (`Space g c`): the 2-char pattern typed so far, then the
+/// labeled matches. `Some` = a leap is in progress (editor renders dimmed).
+#[derive(Debug, Default)]
+pub struct Leap {
+    pub pattern: String,
+    pub labels: Vec<LeapLabel>,
+}
+
 /// Normal-mode keys that wait for a second key: the `d`/`y` operators and
 /// the `g` prefix (`gg`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +65,8 @@ pub struct App {
     /// showcmd-style hint): count prefix and armed operator + its count.
     pub pending_count: Option<usize>,
     pub pending_key: Option<(PendingKey, usize)>,
+    /// Leap-jump in progress (Space g c).
+    pub leap: Option<Leap>,
     lifecycle: Lifecycle,
     /// Demo counter for the `F3` notification-spam key (until real producers exist).
     pub tick_count: u32,
@@ -64,6 +82,7 @@ impl App {
             lifecycle: Lifecycle::Running,
             pending_count: None,
             pending_key: None,
+            leap: None,
             tick_count: 0,
         }
     }

@@ -7,9 +7,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::App;
+use crate::app::Leap;
 use crate::compositor::{Compositor, FocusDirection};
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::files_panel::{self, FilesPanel};
+use crate::layers::leap::LeapLayer;
 use crate::layers::notification::Notification;
 use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
@@ -173,6 +175,15 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
         ],
     },
     KeyNode::Group {
+        key: 'g',
+        description: "+goto",
+        children: &[KeyNode::Leaf {
+            key: 'c',
+            description: "char (2-char leap)",
+            command: "goto.char",
+        }],
+    },
+    KeyNode::Group {
         key: 's',
         description: "+search",
         children: &[
@@ -281,6 +292,16 @@ pub fn default_registry() -> Registry {
             id: "search.buffer",
             description: "Search in buffer (live, n/N cycle)",
             execute: |_app, compositor| compositor.push(Box::new(SearchPrompt::new())),
+        },
+        Command {
+            id: "goto.char",
+            description: "Leap to a 2-char pattern",
+            execute: |app, compositor| {
+                if app.editor.has_buffer() {
+                    app.leap = Some(Leap::default());
+                    compositor.push(Box::new(LeapLayer));
+                }
+            },
         },
         Command {
             id: "search.lines",
