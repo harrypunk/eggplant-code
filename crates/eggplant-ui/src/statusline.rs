@@ -20,6 +20,7 @@ pub fn view(app: &App, focused_layer: Option<&'static str>, area: Rect) -> Eleme
                 .has_buffer()
                 .then(|| (app.editor.cursor(), app.editor.line_count()))
                 .map(|((line, col), total)| (line, col, total)),
+            pending: app.pending_hint(),
             focused_layer,
         },
         area,

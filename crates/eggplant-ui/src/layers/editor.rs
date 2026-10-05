@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use eggplant_core::{Mode, Motion};
 use ratatui::layout::Rect;
 
-use crate::app::App;
+use crate::app::{App, Operator};
 use crate::commands::KeyStroke;
 use crate::components::editor::{self, EditorProps};
 use crate::components::welcome::{self, WelcomeProps};
@@ -231,20 +231,9 @@ pub struct EditorSurface {
     scroll: usize,
     /// Document generation we last saw; a change resets the scroll.
     seen_generation: usize,
-    /// Accumulated count prefix in normal mode (`5j` → 5).
-    count: Option<usize>,
-    /// Pending operator with its count (`d`/`y` waiting for a motion).
-    pending_operator: Option<(Operator, usize)>,
     /// Editor height from the compositor's `resize` hook, so key handling can
     /// keep the cursor visible. Updated outside `render` (Rule 5).
     viewport_height: usize,
-}
-
-/// Operator-pending state: `d`/`y` wait for a motion (or repeat for lines).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Operator {
-    Delete,
-    Yank,
 }
 
 /// Motions an operator consumes, mapped to facade motion targets.
@@ -292,24 +281,24 @@ impl EditorSurface {
         // Count prefix: digits accumulate (`0` is a motion when no count yet).
         if let Some(digit @ ('1'..='9' | '0')) = plain_char(&key) {
             let d = digit.to_digit(10).unwrap() as usize;
-            if d > 0 || self.count.is_some() {
-                self.count = Some(self.count.unwrap_or(0) * 10 + d);
+            if d > 0 || app.pending_count.is_some() {
+                app.pending_count = Some(app.pending_count.unwrap_or(0) * 10 + d);
                 return KeyResult::Consumed;
             }
         }
-        let count = self.count.take().unwrap_or(1);
+        let count = app.pending_count.take().unwrap_or(1);
         // Operator-pending: the next key resolves the operator.
-        if let Some((operator, op_count)) = self.pending_operator.take() {
+        if let Some((operator, op_count)) = app.pending_operator.take() {
             return resolve_operator(operator, op_count * count, key, app);
         }
         // `d` / `y` arm the operator (count rides along: `2dw` == `d2w`).
         match plain_char(&key) {
             Some('d') => {
-                self.pending_operator = Some((Operator::Delete, count));
+                app.pending_operator = Some((Operator::Delete, count));
                 return KeyResult::Consumed;
             }
             Some('y') => {
-                self.pending_operator = Some((Operator::Yank, count));
+                app.pending_operator = Some((Operator::Yank, count));
                 return KeyResult::Consumed;
             }
             _ => {}
@@ -319,7 +308,7 @@ impl EditorSurface {
             None => KeyResult::Ignored,
         };
         if matches!(result, KeyResult::Ignored) {
-            self.count = None; // dead key clears a pending count
+            app.pending_count = None; // dead key clears a pending count
         }
         result
     }
