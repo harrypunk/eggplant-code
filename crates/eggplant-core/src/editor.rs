@@ -397,6 +397,16 @@ impl Editor {
         self.doc().text().len_lines()
     }
 
+    /// Lines as a user counts them: excludes the phantom trailing empty
+    /// line a file-final newline produces in the rope. Gutter numbering
+    /// and viewport clamping use this, not `line_count`.
+    pub fn display_line_count(&self) -> usize {
+        if self.current.is_none() {
+            return 0;
+        }
+        self.last_line() + 1
+    }
+
     /// One line as highlighted spans (plain text when the language is
     /// unsupported). Clipped of the line ending.
     pub fn highlighted_line(&self, line: usize) -> Vec<HighlightedSpan> {
@@ -2015,6 +2025,21 @@ mod tests {
         assert_eq!(ed.find_matches("ab"), vec![(0, 0), (0, 3), (1, 1)]);
         assert_eq!(ed.find_matches(""), Vec::new());
         assert_eq!(ed.find_matches("zz"), Vec::new());
+    }
+
+    #[test]
+    fn display_line_count_matches_user_counted_lines() {
+        // Real file loads: a file-final newline is a terminator, not an
+        // extra line. (Scratch docs can't probe this: they start with a
+        // placeholder newline.)
+        let cases = [("one\ntwo\n", 2), ("one\ntwo", 2), ("one\n", 1), ("", 1)];
+        for (i, (content, want)) in cases.into_iter().enumerate() {
+            let path = temp_file(&format!("dlc-{i}"), content);
+            let ed = Editor::open(&path).unwrap();
+            assert_eq!(ed.display_line_count(), want, "{content:?}");
+            std::fs::remove_file(&path).ok();
+        }
+        assert_eq!(Editor::empty().unwrap().display_line_count(), 0);
     }
 
     #[test]

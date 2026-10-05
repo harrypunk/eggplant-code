@@ -55,9 +55,12 @@ impl Layer for EditorSurface {
             return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
         }
         let leap = app.leap.as_ref();
+        // Never number rows past the file's real end (user-counted lines).
+        let line_count = app.editor.display_line_count();
+        let visible_end = (self.scroll + area.height as usize).min(line_count);
         editor::view(
             &EditorProps {
-                lines: (self.scroll..self.scroll + area.height as usize)
+                lines: (self.scroll..visible_end)
                     .map(|line| EditorLine {
                         spans: app.editor.highlighted_line(line),
                         selection: app.editor.visual_selection_on_line(line),
@@ -74,7 +77,7 @@ impl Layer for EditorSurface {
                     })
                     .collect(),
                 scroll: self.scroll,
-                line_count: app.editor.line_count(),
+                line_count,
                 cursor: app.editor.cursor(),
                 // Dim once labels are up (leap's second phase).
                 dim: leap.is_some_and(|leap| !leap.labels.is_empty()),
