@@ -35,15 +35,71 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `p` | paste after cursor / below line (linewise) |
 | `u` / `C-r` | undo / redo (one revision per insert session) |
 | `Esc` | back to normal mode |
-| `Space` | which-key menu: `f` file, `b` buffer, `q` quit, `t` theme, `p` palette |
+
+### Global keys
+
+| Key | Action |
+| --- | --- |
 | `C-S-p` (or `C-p`) | command palette — fuzzy over the complete command list |
 | `C-e` | toggle file explorer |
-| explorer: `j`/`k` | move |
-| explorer: `l` / `h` | expand directory / collapse (or jump to parent) |
-| explorer: `Enter` | open file, toggle directory |
 | `C-h` / `C-l` | move window focus left / right (editor ↔ explorer) |
 | `C-s` | save |
 | `C-q` / `C-c` | quit (confirm on unsaved) / force-quit |
+
+Explorer keys: `j`/`k` move, `l`/`h` expand / collapse-or-parent, `Enter`
+open file / toggle directory.
+
+### Keybinding levels
+
+Commands live at three levels, by frequency:
+
+1. **Command palette** (`C-S-p`) — the complete reference: every command,
+   fuzzy-searchable. If it exists, it's here.
+2. **`Space` prefix tree** (which-key) — common functionality, grouped for
+   discovery. Menus cost one extra key but show themselves.
+3. **Direct modal sequences** — the few daily-driver commands get two-key
+   normal-mode sequences via the pending-prefix mechanism (the same state
+   machine behind `gg`): today `gg`/`dd`/`yy`; planned `◌ g d` goto
+   definition, `◌ s r` grep project root. These shadow nothing — `g`/`s`
+   are prefixes, not single-key commands.
+
+### The `Space` tree (which-key)
+
+Mnemonic groups, helix-style. Group letters are **reserved up front** so
+future LSP / AI / navigation features extend the tree without ever moving
+an existing binding. `◌` = designed, not yet implemented.
+
+```
+Space
+├── f +file
+│   ├── s save
+│   ├── q save & quit
+│   └── e explorer
+├── b +buffer
+│   ├── n next
+│   ├── p prev
+│   └── d close
+├── s +search
+│   ├── b in buffer        — live /-style search, n/N cycle
+│   ├── c grep lines       — live picker over buffer lines
+│   └── p in project  ◌    — workspace live-grep (fast path: `s r`)
+├── g +goto
+│   ├── c char             — 2-char leap jump
+│   ├── d definition  ◌    — LSP (fast path: `g d`)
+│   └── r references  ◌    — LSP (fast path: `g r`)
+├── w +window  ◌           — focus/split management (beyond C-h/C-l)
+├── l +lsp  ◌              — hover, rename, code actions, diagnostics
+├── a +ai  ◌               — agent chat, inline edit, …
+├── p command palette
+├── t cycle theme
+└── q quit
+```
+
+Rules of the tree: groups are nouns (`f`ile, `b`uffer, `s`earch…), leaves
+are verbs; every leaf maps to a registry command id (so the palette and the
+which-key menu can never disagree); the root holds only the few cross-group
+singletons (`p` palette, `t` theme, `q` quit). Keybindings will become
+user-configurable (`keys.toml`) once the config loader lands (M8).
 
 ## Themes
 

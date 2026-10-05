@@ -131,6 +131,11 @@ impl KeyNode {
 
 /// The which-key root (`Space`). Common commands; the full list lives in the
 /// palette (`C-S-p`).
+///
+/// Design rules (the full tree incl. planned groups is in README):
+/// groups are nouns, leaves are verbs, every leaf names a registry command
+/// id. Group letters are reserved up front (`s` search, `g` goto, `w`
+/// window, `l` lsp, `a` ai) so future features never reshuffle bindings.
 pub static WHICH_KEY_ROOT: &[KeyNode] = &[
     KeyNode::Group {
         key: 'f',
