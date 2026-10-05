@@ -17,9 +17,9 @@ use helix_core::movement::{move_next_word_end, move_next_word_start, move_prev_w
 use helix_core::selection::Range;
 use helix_core::syntax;
 use helix_core::{Selection, Transaction};
-use helix_view::ViewId;
 use helix_view::document::Document;
-use helix_view::editor::Config;
+use helix_view::editor::{Config, GutterConfig};
+use helix_view::{DocumentId, View};
 
 use crate::highlight::{self, HighlightedSpan};
 use crate::mode::Mode;
@@ -87,9 +87,6 @@ impl Backend {
 /// An open document plus its per-buffer state.
 struct Buffer {
     doc: Document,
-    /// Edit transactions applied since the last save (our own modified flag,
-    /// independent of helix internals so the facade stays backend-agnostic).
-    edits_since_save: usize,
 }
 
 /// Display path relative to the working directory (editor chrome style);
@@ -106,10 +103,7 @@ fn relative_display(path: &std::path::Path) -> String {
 
 impl Buffer {
     fn new(doc: Document) -> Self {
-        Self {
-            doc,
-            edits_since_save: 0,
-        }
+        Self { doc }
     }
 
     fn display_name(&self) -> String {
@@ -136,7 +130,8 @@ pub struct Editor {
     /// Index of the current buffer in `buffers`.
     /// Index of the current buffer; `None` when no buffer is open.
     current: Option<usize>,
-    view_id: ViewId,
+    /// The single view (identity for selections + jumplist sync on undo/redo).
+    view: View,
     mode: Mode,
     /// Bumped whenever the *identity* of the current document changes
     /// (open/switch/close), so the UI can drop per-document state.
@@ -164,7 +159,7 @@ impl Editor {
         Ok(Self {
             buffers: Vec::new(),
             current: None,
-            view_id: ViewId::default(),
+            view: View::new(DocumentId::default(), GutterConfig::default()),
             mode: Mode::Normal,
             generation: 0,
             backend: Backend::new()?,
@@ -172,11 +167,11 @@ impl Editor {
     }
 
     fn new(buffer: Buffer, backend: Backend) -> Self {
-        let view_id = ViewId::default();
+        let view = View::new(buffer.doc.id(), GutterConfig::default());
         let mut editor = Self {
             buffers: vec![buffer],
             current: Some(0),
-            view_id,
+            view,
             mode: Mode::Normal,
             generation: 0,
             backend,
@@ -186,10 +181,31 @@ impl Editor {
     }
 
     fn reset_cursor(&mut self) {
-        let view_id = self.view_id;
+        let view_id = self.view.id;
         if let Some(doc) = self.doc_mut() {
             doc.set_selection(view_id, Selection::point(0));
         }
+    }
+
+    /// Commit pending changes as one undo revision (vim granularity: one
+    /// revision per insert session / normal-mode command).
+    fn commit_history(&mut self) {
+        let Some(i) = self.current else { return };
+        self.buffers[i]
+            .doc
+            .append_changes_to_history(&mut self.view);
+    }
+
+    /// Undo the last revision. False when already at the oldest change.
+    pub fn undo(&mut self) -> bool {
+        let Some(i) = self.current else { return false };
+        self.buffers[i].doc.undo(&mut self.view)
+    }
+
+    /// Redo the last undone revision. False when nothing to redo.
+    pub fn redo(&mut self) -> bool {
+        let Some(i) = self.current else { return false };
+        self.buffers[i].doc.redo(&mut self.view)
     }
 
     /// The current buffer's document. Private helpers assume `Some` — every
@@ -282,7 +298,7 @@ impl Editor {
             .map(|(index, b)| BufferInfo {
                 index,
                 name: b.display_name(),
-                modified: b.edits_since_save > 0,
+                modified: b.doc.is_modified(),
                 current: Some(index) == self.current,
                 scratch: b.doc.path().is_none(),
             })
@@ -300,7 +316,7 @@ impl Editor {
 
     /// True when any buffer has unsaved changes (used by quit guards).
     pub fn any_modified(&self) -> bool {
-        self.buffers.iter().any(|b| b.edits_since_save > 0)
+        self.buffers.iter().any(|b| b.doc.is_modified())
     }
 
     /// Document identity counter — the UI resets scroll etc. when it changes.
@@ -316,7 +332,7 @@ impl Editor {
 
     pub fn is_modified(&self) -> bool {
         self.current
-            .is_some_and(|i| self.buffers[i].edits_since_save > 0)
+            .is_some_and(|i| self.buffers[i].doc.is_modified())
     }
 
     pub fn line_count(&self) -> usize {
@@ -366,14 +382,14 @@ impl Editor {
 
     fn cursor_char_idx(&self) -> usize {
         self.doc()
-            .selection(self.view_id)
+            .selection(self.view.id)
             .primary()
             .cursor(self.doc().text().slice(..))
     }
 
     /// Raw head of the primary range — the insert position in insert mode.
     fn selection_head(&self) -> usize {
-        self.doc().selection(self.view_id).primary().head
+        self.doc().selection(self.view.id).primary().head
     }
 
     /// Put the cursor at `pos`, respecting helix's block-cursor selection
@@ -383,7 +399,7 @@ impl Editor {
     /// - normal: forward `(pos, pos+1)`, block cursor sits at `pos`
     /// - insert: backward `(pos+1, pos)`, insert bar sits at `pos`
     fn set_cursor(&mut self, pos: usize) {
-        let view_id = self.view_id;
+        let view_id = self.view.id;
         let len = self.doc().text().len_chars();
         let pos = pos.min(len);
         let range = match self.mode {
@@ -447,6 +463,8 @@ impl Editor {
         };
         self.mode = Mode::Normal;
         self.set_cursor(target);
+        // End of an insert session: commit it as one undo revision.
+        self.commit_history();
     }
 
     // ---- movements ----
@@ -588,7 +606,7 @@ impl Editor {
             return;
         }
         let text = self.doc().text().slice(..);
-        let range = self.doc().selection(self.view_id).primary();
+        let range = self.doc().selection(self.view.id).primary();
         let new = motion(text, range, count);
         if new.head == range.head {
             return; // motion didn't move
@@ -602,13 +620,10 @@ impl Editor {
         if self.current.is_none() {
             return;
         }
-        let view_id = self.view_id;
+        let view_id = self.view.id;
         let doc = self.doc_mut().expect("current buffer");
         // `Document::apply` also incrementally reparses the syntax tree.
         doc.apply(&transaction, view_id);
-        if let Some(i) = self.current_buffer() {
-            self.buffers[i].edits_since_save += 1;
-        }
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -621,7 +636,7 @@ impl Editor {
         }
         let transaction = Transaction::insert(
             self.doc().text(),
-            self.doc().selection(self.view_id),
+            self.doc().selection(self.view.id),
             s.into(),
         );
         self.apply(transaction);
@@ -700,6 +715,8 @@ impl Editor {
             [(pos, to)].into_iter(),
         ));
         self.clamp_cursor_off_line_ending();
+        // Standalone normal-mode edit: its own undo revision.
+        self.commit_history();
     }
 
     /// Normal mode: the block cursor never rests on a line ending unless the
@@ -718,6 +735,9 @@ impl Editor {
         if self.current.is_none() {
             bail!("no buffer to save");
         }
+        // Commit pending changes so the saved revision is a history revision
+        // (is_modified compares against it).
+        self.commit_history();
         let doc = self.doc_mut().expect("current buffer");
         let future = doc.save::<PathBuf>(None, false)?;
         let event = self
@@ -727,9 +747,6 @@ impl Editor {
             .context("save failed")?;
         let doc = self.doc_mut().expect("current buffer");
         doc.set_last_saved_revision(event.revision, event.save_time);
-        if let Some(i) = self.current_buffer() {
-            self.buffers[i].edits_since_save = 0;
-        }
         Ok(())
     }
 
@@ -1055,6 +1072,62 @@ mod tests {
             );
         }
         std::fs::remove_file(&path).unwrap();
+    }
+
+    // ---- undo/redo ----
+
+    #[test]
+    fn undo_redo_roundtrip() {
+        let mut ed = editor_with("hello"); // one insert session
+        assert!(ed.undo());
+        assert_eq!(text_of(&ed), "\n");
+        assert!(ed.redo());
+        assert_eq!(text_of(&ed), "hello\n");
+    }
+
+    #[test]
+    fn undo_granularity_is_per_insert_session() {
+        let mut ed = Editor::scratch().unwrap();
+        ed.enter_insert();
+        ed.insert_str("one ");
+        ed.enter_normal();
+        ed.enter_append();
+        ed.insert_str("two");
+        ed.enter_normal();
+        assert_eq!(text_of(&ed), "one two\n");
+
+        // First undo reverts only the second session (vim convention).
+        assert!(ed.undo());
+        assert_eq!(text_of(&ed), "one \n");
+        assert!(ed.undo());
+        assert_eq!(text_of(&ed), "\n");
+        assert!(!ed.undo(), "third undo: nothing left");
+    }
+
+    #[test]
+    fn undo_at_oldest_change_returns_false() {
+        let mut ed = Editor::scratch().unwrap();
+        assert!(!ed.undo());
+        assert!(!ed.redo());
+    }
+
+    #[test]
+    fn modified_flag_follows_undo_revisions() {
+        let mut ed = editor_with("dirty");
+        assert!(ed.is_modified());
+        assert!(ed.undo());
+        assert!(!ed.is_modified(), "undo back to the saved state is clean");
+        assert!(ed.redo());
+        assert!(ed.is_modified());
+    }
+
+    #[test]
+    fn x_delete_is_its_own_revision() {
+        let mut ed = editor_with("ab"); // post-Esc cursor sits on 'b'
+        ed.delete_char_at_cursor();
+        assert_eq!(text_of(&ed), "a\n");
+        assert!(ed.undo());
+        assert_eq!(text_of(&ed), "ab\n");
     }
 
     #[test]

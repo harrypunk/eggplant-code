@@ -14,6 +14,7 @@ use crate::components::editor::{self, EditorProps};
 use crate::components::welcome::{self, WelcomeProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
+use crate::layers::notification::Notification;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -63,6 +64,22 @@ fn goto_line(app: &mut App, count: usize) -> KeyResult {
 
 fn delete_char(app: &mut App, _: usize) -> KeyResult {
     app.editor.delete_char_at_cursor();
+    consumed()
+}
+
+fn undo(app: &mut App, _: usize) -> KeyResult {
+    if !app.editor.undo() {
+        app.notifications
+            .push(Notification::info("already at oldest change"));
+    }
+    consumed()
+}
+
+fn redo(app: &mut App, _: usize) -> KeyResult {
+    if !app.editor.redo() {
+        app.notifications
+            .push(Notification::info("already at newest change"));
+    }
     consumed()
 }
 
@@ -130,6 +147,8 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('$'), line_end),
     (KeyStroke::char('G'), goto_line),
     (KeyStroke::char('x'), delete_char),
+    (KeyStroke::char('u'), undo),
+    (KeyStroke::ctrl('r'), redo),
     (KeyStroke::char('i'), enter_insert),
     (KeyStroke::char('a'), enter_append),
     (KeyStroke::char('o'), open_below),
