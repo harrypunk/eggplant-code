@@ -89,6 +89,33 @@ struct Buffer {
     doc: Document,
 }
 
+/// The yank register: text plus whether it was taken linewise (`yy`/`dd`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Register {
+    pub text: String,
+    pub linewise: bool,
+}
+
+/// Motions that operators (`d`/`y`) can consume, as char-index targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    Left,
+    Right,
+    WordForward,
+    WordEnd,
+    WordBackward,
+    LineStart,
+    LineEnd,
+}
+
+impl Motion {
+    /// Inclusive motions include the target char. Only `$` needs the bump:
+    /// helix's word-end head is already one past the last word char.
+    fn inclusive(self) -> bool {
+        matches!(self, Self::LineEnd)
+    }
+}
+
 /// Display path relative to the working directory (editor chrome style);
 /// falls back to the full path for files outside it.
 fn relative_display(path: &std::path::Path) -> String {
@@ -136,6 +163,8 @@ pub struct Editor {
     /// Bumped whenever the *identity* of the current document changes
     /// (open/switch/close), so the UI can drop per-document state.
     generation: usize,
+    /// The yank register (shared across buffers, vim-style).
+    register: Option<Register>,
     backend: Backend,
 }
 
@@ -162,6 +191,7 @@ impl Editor {
             view: View::new(DocumentId::default(), GutterConfig::default()),
             mode: Mode::Normal,
             generation: 0,
+            register: None,
             backend: Backend::new()?,
         })
     }
@@ -174,6 +204,7 @@ impl Editor {
             view,
             mode: Mode::Normal,
             generation: 0,
+            register: None,
             backend,
         };
         editor.reset_cursor();
@@ -729,6 +760,149 @@ impl Editor {
         }
     }
 
+    // ---- operators (delete / yank / paste) ----
+
+    /// The char range an operator covers for `motion` with `count`
+    /// (inclusive motions include the target char). Empty when no buffer.
+    pub fn operator_range(&self, motion: Motion, count: usize) -> std::ops::Range<usize> {
+        let Some(_) = self.current else { return 0..0 };
+        let text = self.doc().text().slice(..);
+        let range = self.doc().selection(self.view.id).primary();
+        let cursor = self.cursor_char_idx();
+        let (line, col) = self.cursor();
+        let line_start = text.line_to_char(line);
+        let line_len = self.line_char_len(line);
+        let target = match motion {
+            Motion::Left => line_start + col.saturating_sub(count),
+            Motion::Right => line_start + (col + count).min(line_len.saturating_sub(1)),
+            Motion::WordForward => move_next_word_start(text, range, count).head,
+            Motion::WordEnd => move_next_word_end(text, range, count).head,
+            Motion::WordBackward => move_prev_word_start(text, range, count).head,
+            Motion::LineStart => line_start,
+            Motion::LineEnd => line_start + line_len.saturating_sub(1),
+        };
+        let start = cursor.min(target);
+        let mut end = cursor.max(target);
+        if motion.inclusive() && end < text.len_chars() {
+            end = next_grapheme_boundary(text, end);
+        }
+        start..end
+    }
+
+    /// Yank a char range into the register (charwise). Empty range: no-op.
+    pub fn yank_range(&mut self, range: std::ops::Range<usize>) {
+        if self.current.is_none() || range.is_empty() {
+            return;
+        }
+        let text = self.doc().text().slice(range.start..range.end).to_string();
+        self.register = Some(Register {
+            text,
+            linewise: false,
+        });
+    }
+
+    /// Delete a char range; the cursor lands on the range start.
+    pub fn delete_range(&mut self, range: std::ops::Range<usize>) {
+        if self.current.is_none() || range.is_empty() {
+            return;
+        }
+        self.yank_range(range.clone()); // vim convention: delete also yanks
+        self.apply(Transaction::delete(
+            self.doc().text(),
+            [(range.start, range.end)].into_iter(),
+        ));
+        self.set_cursor(
+            range
+                .start
+                .min(self.doc().text().len_chars().saturating_sub(1)),
+        );
+        self.clamp_cursor_off_line_ending();
+        self.commit_history();
+    }
+
+    /// Yank the current line including its newline (`yy`).
+    pub fn yank_line(&mut self) {
+        let Some(range) = self.current_line_range() else {
+            return;
+        };
+        let text = self.doc().text().slice(range).to_string();
+        self.register = Some(Register {
+            text,
+            linewise: true,
+        });
+    }
+
+    /// Delete the current line including its newline (`dd`).
+    pub fn delete_line(&mut self) {
+        let Some(range) = self.current_line_range() else {
+            return;
+        };
+        if range.is_empty() {
+            return; // phantom empty last line: nothing to delete
+        }
+        self.yank_line();
+        self.apply(Transaction::delete(
+            self.doc().text(),
+            [(range.start, range.end)].into_iter(),
+        ));
+        self.set_cursor(
+            range
+                .start
+                .min(self.doc().text().len_chars().saturating_sub(1)),
+        );
+        self.clamp_cursor_off_line_ending();
+        self.commit_history();
+    }
+
+    /// Char range of the current line including its line ending.
+    fn current_line_range(&self) -> Option<std::ops::Range<usize>> {
+        self.current?;
+        let text = self.doc().text();
+        let (line, _) = self.cursor();
+        let start = text.line_to_char(line);
+        let end = text.line_to_char((line + 1).min(text.len_lines() - 1));
+        let end = if line + 1 < text.len_lines() {
+            end
+        } else {
+            text.len_chars()
+        };
+        Some(start..end)
+    }
+
+    /// Paste the register after the cursor (`p`): charwise after the cursor
+    /// char; linewise on the line below. No-op with an empty register.
+    pub fn paste_after(&mut self) {
+        let Some(register) = self.register.clone() else {
+            return;
+        };
+        let Some(_) = self.current else { return };
+        let insert_at = if register.linewise {
+            let text = self.doc().text();
+            let (line, _) = self.cursor();
+            text.line_to_char((line + 1).min(text.len_lines() - 1))
+        } else {
+            let text = self.doc().text().slice(..);
+            let (line, _) = self.cursor();
+            let line_start = text.line_to_char(line);
+            let line_end = line_start + self.line_char_len(line);
+            next_grapheme_boundary(text, self.cursor_char_idx()).min(line_end)
+        };
+        self.apply(Transaction::insert(
+            self.doc().text(),
+            &Selection::point(insert_at),
+            register.text.into(),
+        ));
+        // Land the cursor at the start of the pasted text.
+        self.set_cursor(insert_at);
+        self.clamp_cursor_off_line_ending();
+        self.commit_history();
+    }
+
+    /// Current register contents (for tests/status display).
+    pub fn register(&self) -> Option<&Register> {
+        self.register.as_ref()
+    }
+
     // ---- persistence ----
 
     pub fn save(&mut self) -> Result<()> {
@@ -1128,6 +1302,101 @@ mod tests {
         assert_eq!(text_of(&ed), "a\n");
         assert!(ed.undo());
         assert_eq!(text_of(&ed), "ab\n");
+    }
+
+    // ---- operators: d / y / p ----
+
+    #[test]
+    fn dw_deletes_to_next_word_start() {
+        let mut ed = editor_with("foo bar baz");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        let range = ed.operator_range(Motion::WordForward, 1);
+        ed.delete_range(range);
+        assert_eq!(text_of(&ed), "bar baz\n");
+        assert_eq!(ed.register().unwrap().text, "foo "); // delete also yanks
+        assert_eq!(ed.cursor(), (0, 0));
+    }
+
+    #[test]
+    fn de_is_inclusive_of_word_end() {
+        let mut ed = editor_with("foo bar");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.delete_range(ed.operator_range(Motion::WordEnd, 1));
+        assert_eq!(text_of(&ed), " bar\n");
+    }
+
+    #[test]
+    fn d_dollar_keeps_the_newline() {
+        let mut ed = editor_with("foo bar\nnext");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.delete_range(ed.operator_range(Motion::LineEnd, 1));
+        assert_eq!(text_of(&ed), "\nnext\n");
+    }
+
+    #[test]
+    fn db_from_word_start_deletes_the_previous_word() {
+        let mut ed = editor_with("foo bar");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.move_right(4); // on 'b' of "bar"
+        ed.delete_range(ed.operator_range(Motion::WordBackward, 1));
+        assert_eq!(text_of(&ed), "bar\n");
+    }
+
+    #[test]
+    fn db_from_word_middle_deletes_to_word_start() {
+        let mut ed = editor_with("foo bar");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.move_right(5); // on 'a' of "bar"
+        ed.delete_range(ed.operator_range(Motion::WordBackward, 1));
+        assert_eq!(text_of(&ed), "foo ar\n", "cursor char survives");
+    }
+
+    #[test]
+    fn yy_p_duplicates_the_line_below() {
+        let mut ed = editor_with("abc\ndef");
+        ed.move_to_line(0);
+        ed.yank_line();
+        assert!(ed.register().unwrap().linewise);
+        ed.paste_after();
+        assert_eq!(text_of(&ed), "abc\nabc\ndef\n");
+        assert_eq!(ed.cursor().0, 1, "cursor lands on the pasted line");
+    }
+
+    #[test]
+    fn dd_deletes_line_and_p_restores_it_below() {
+        let mut ed = editor_with("one\ntwo\nthree");
+        ed.move_to_line(0);
+        ed.delete_line();
+        assert_eq!(text_of(&ed), "two\nthree\n");
+        assert_eq!(ed.cursor(), (0, 0));
+        ed.paste_after(); // paste "one" below "two"
+        assert_eq!(text_of(&ed), "two\none\nthree\n");
+    }
+
+    #[test]
+    fn charwise_yank_and_paste_after_cursor() {
+        let mut ed = editor_with("foo bar");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.yank_range(ed.operator_range(Motion::WordEnd, 1)); // "foo"
+        assert!(!ed.register().unwrap().linewise);
+        ed.paste_after(); // after the 'f'
+        assert_eq!(text_of(&ed), "ffoooo bar\n");
+    }
+
+    #[test]
+    fn dd_is_undoable_as_one_revision() {
+        let mut ed = editor_with("one\ntwo");
+        ed.move_to_line(0);
+        ed.delete_line();
+        assert_eq!(text_of(&ed), "two\n");
+        assert!(ed.undo());
+        assert_eq!(text_of(&ed), "one\ntwo\n");
     }
 
     #[test]

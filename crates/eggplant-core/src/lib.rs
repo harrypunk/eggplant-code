@@ -8,7 +8,7 @@ pub mod editor;
 pub mod highlight;
 pub mod mode;
 
-pub use editor::{BufferInfo, Editor};
+pub use editor::{BufferInfo, Editor, Motion, Register};
 pub use highlight::{HighlightedSpan, SyntaxScope};
 pub use mode::Mode;
 

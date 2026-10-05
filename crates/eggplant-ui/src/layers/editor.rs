@@ -5,7 +5,7 @@
 //! editor commands. Normal mode supports count prefixes (`5j`, `12G`-style).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use eggplant_core::Mode;
+use eggplant_core::{Mode, Motion};
 use ratatui::layout::Rect;
 
 use crate::app::App;
@@ -64,6 +64,31 @@ fn goto_line(app: &mut App, count: usize) -> KeyResult {
 
 fn delete_char(app: &mut App, _: usize) -> KeyResult {
     app.editor.delete_char_at_cursor();
+    consumed()
+}
+
+/// Resolve an armed operator against its motion key. Repeated operator
+/// (`dd`/`yy`) works linewise; any non-motion key cancels (vim-style).
+fn resolve_operator(operator: Operator, count: usize, key: KeyEvent, app: &mut App) -> KeyResult {
+    match (operator, plain_char(&key)) {
+        (Operator::Delete, Some('d')) => app.editor.delete_line(),
+        (Operator::Yank, Some('y')) => app.editor.yank_line(),
+        _ => {
+            // A motion resolves the operator; anything else cancels it.
+            if let Some(motion) = lookup(OPERATOR_MOTIONS, &key) {
+                let range = app.editor.operator_range(motion, count);
+                match operator {
+                    Operator::Delete => app.editor.delete_range(range),
+                    Operator::Yank => app.editor.yank_range(range),
+                }
+            }
+        }
+    }
+    KeyResult::Consumed
+}
+
+fn paste_after(app: &mut App, _: usize) -> KeyResult {
+    app.editor.paste_after();
     consumed()
 }
 
@@ -147,6 +172,7 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('$'), line_end),
     (KeyStroke::char('G'), goto_line),
     (KeyStroke::char('x'), delete_char),
+    (KeyStroke::char('p'), paste_after),
     (KeyStroke::char('u'), undo),
     (KeyStroke::ctrl('r'), redo),
     (KeyStroke::char('i'), enter_insert),
@@ -182,7 +208,7 @@ static INSERT_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::new(KeyCode::Down, KeyModifiers::NONE), move_down),
 ];
 
-fn lookup(keymap: &[(KeyStroke, EditorCommand)], key: &KeyEvent) -> Option<EditorCommand> {
+fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
     keymap
         .iter()
         .find(|(stroke, _)| stroke.matches(key))
@@ -207,10 +233,38 @@ pub struct EditorSurface {
     seen_generation: usize,
     /// Accumulated count prefix in normal mode (`5j` → 5).
     count: Option<usize>,
+    /// Pending operator with its count (`d`/`y` waiting for a motion).
+    pending_operator: Option<(Operator, usize)>,
     /// Editor height from the compositor's `resize` hook, so key handling can
     /// keep the cursor visible. Updated outside `render` (Rule 5).
     viewport_height: usize,
 }
+
+/// Operator-pending state: `d`/`y` wait for a motion (or repeat for lines).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Operator {
+    Delete,
+    Yank,
+}
+
+/// Motions an operator consumes, mapped to facade motion targets.
+static OPERATOR_MOTIONS: &[(KeyStroke, Motion)] = &[
+    (KeyStroke::char('w'), Motion::WordForward),
+    (KeyStroke::char('e'), Motion::WordEnd),
+    (KeyStroke::char('b'), Motion::WordBackward),
+    (KeyStroke::char('0'), Motion::LineStart),
+    (KeyStroke::char('$'), Motion::LineEnd),
+    (KeyStroke::char('h'), Motion::Left),
+    (
+        KeyStroke::new(KeyCode::Left, KeyModifiers::NONE),
+        Motion::Left,
+    ),
+    (KeyStroke::char('l'), Motion::Right),
+    (
+        KeyStroke::new(KeyCode::Right, KeyModifiers::NONE),
+        Motion::Right,
+    ),
+];
 
 impl EditorSurface {
     pub fn new() -> Self {
@@ -244,6 +298,22 @@ impl EditorSurface {
             }
         }
         let count = self.count.take().unwrap_or(1);
+        // Operator-pending: the next key resolves the operator.
+        if let Some((operator, op_count)) = self.pending_operator.take() {
+            return resolve_operator(operator, op_count * count, key, app);
+        }
+        // `d` / `y` arm the operator (count rides along: `2dw` == `d2w`).
+        match plain_char(&key) {
+            Some('d') => {
+                self.pending_operator = Some((Operator::Delete, count));
+                return KeyResult::Consumed;
+            }
+            Some('y') => {
+                self.pending_operator = Some((Operator::Yank, count));
+                return KeyResult::Consumed;
+            }
+            _ => {}
+        }
         let result = match lookup(NORMAL_KEYMAP, &key) {
             Some(command) => command(app, count),
             None => KeyResult::Ignored,

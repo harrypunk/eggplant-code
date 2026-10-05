@@ -26,6 +26,9 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `5j` … | count prefixes on motions |
 | `i` `a` `o` `O` | insert / append / open below / above |
 | `x` | delete char under cursor |
+| `d{motion}` / `dd` | delete (to motion / whole line); also yanks |
+| `y{motion}` / `yy` | yank (to motion / whole line) |
+| `p` | paste after cursor / below line (linewise) |
 | `u` / `C-r` | undo / redo (one revision per insert session) |
 | `Esc` | back to normal mode |
 | `Space` | which-key menu: `f` file, `b` buffer, `q` quit, `t` theme, `p` palette |
