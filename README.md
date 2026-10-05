@@ -47,7 +47,8 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `C-q` / `C-c` | quit (confirm on unsaved) / force-quit |
 
 Explorer keys: `j`/`k` move, `l`/`h` expand / collapse-or-parent, `Enter`
-open file / toggle directory.
+open file / toggle directory, `I` toggle full / filtered listing (filtered
+hides dotfiles + ignore-rule matches — the same rules as the picker).
 
 ### Keybinding levels
 

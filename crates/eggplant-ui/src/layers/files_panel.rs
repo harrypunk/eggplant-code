@@ -20,6 +20,7 @@ use crate::app::App;
 use crate::components::files_panel::{self, FilesPanelProps, RowKind, RowProps};
 use crate::compositor::{KeyResult, Layer, LayerKind, Side};
 use crate::element::Element;
+use crate::files::IgnoreRules;
 use crate::layers::notification::Notification;
 
 pub const PANEL_ID: &str = "files";
@@ -43,6 +44,9 @@ struct Row {
 pub struct FilesPanel {
     /// Fixed tree root — never changes for the panel's lifetime.
     root: PathBuf,
+    /// `false`: ignore rules + dotfiles are filtered out (default).
+    /// `true` (`I` toggle): the full, unfiltered listing.
+    show_all: bool,
     /// Directories whose children are visible (the root is always expanded).
     expanded: HashSet<PathBuf>,
     /// Lazily loaded directory listings, filled on expand.
@@ -77,6 +81,7 @@ impl FilesPanel {
         cache.insert(root.clone(), read_children(&root)?);
         Ok(Self {
             expanded: HashSet::from([root.clone()]),
+            show_all: false,
             root,
             cache,
             selected: 0,
@@ -86,13 +91,25 @@ impl FilesPanel {
     }
 
     /// The flattened, currently-visible tree (derived from `expanded`).
-    fn rows(&self) -> Vec<Row> {
-        fn walk(panel: &FilesPanel, dir: &Path, depth: usize, rows: &mut Vec<Row>) {
+    /// Unless `show_all`, dotfiles and ignore-rule matches are filtered.
+    fn rows(&self, ignores: &IgnoreRules) -> Vec<Row> {
+        fn walk(
+            panel: &FilesPanel,
+            ignores: &IgnoreRules,
+            dir: &Path,
+            depth: usize,
+            rows: &mut Vec<Row>,
+        ) {
             let Some(children) = panel.cache.get(dir) else {
                 return;
             };
             for child in children {
                 let path = dir.join(&child.name);
+                if !panel.show_all
+                    && (child.name.starts_with('.') || ignores.is_ignored(&path, child.is_dir))
+                {
+                    continue;
+                }
                 let expanded = panel.expanded.contains(&path);
                 rows.push(Row {
                     name: child.name.clone(),
@@ -102,26 +119,40 @@ impl FilesPanel {
                     expanded,
                 });
                 if child.is_dir && expanded {
-                    walk(panel, &path, depth + 1, rows);
+                    walk(panel, ignores, &path, depth + 1, rows);
                 }
             }
         }
         let mut rows = Vec::new();
-        walk(self, &self.root.clone(), 0, &mut rows);
+        walk(self, ignores, &self.root.clone(), 0, &mut rows);
         rows
     }
 
-    fn selected_row(&self) -> Option<Row> {
-        self.rows().into_iter().nth(self.selected)
+    fn selected_row(&self, ignores: &IgnoreRules) -> Option<Row> {
+        self.rows(ignores).into_iter().nth(self.selected)
     }
 
-    fn move_selection(&mut self, delta: isize) {
-        let len = self.rows().len();
+    fn move_selection(&mut self, delta: isize, ignores: &IgnoreRules) {
+        let len = self.rows(ignores).len();
         if len == 0 {
             return;
         }
         self.selected = self.selected.saturating_add_signed(delta).min(len - 1);
         self.ensure_selection_visible();
+    }
+
+    /// `I`: toggle the full / filtered listing.
+    fn toggle_show_all(&mut self, ignores: &IgnoreRules) -> bool {
+        self.show_all = !self.show_all;
+        // Selection may point past the end of the now-shorter list.
+        let len = self.rows(ignores).len();
+        if len > 0 {
+            self.selected = self.selected.min(len - 1);
+        } else {
+            self.selected = 0;
+        }
+        self.ensure_selection_visible();
+        self.show_all
     }
 
     /// Scroll the window so the selected row stays visible.
@@ -136,8 +167,8 @@ impl FilesPanel {
 
     /// Expand the selected directory. Errors (permissions, races) surface as
     /// `Err`; the caller notifies.
-    fn expand_selected(&mut self) -> io::Result<()> {
-        let Some(row) = self.selected_row() else {
+    fn expand_selected(&mut self, ignores: &IgnoreRules) -> io::Result<()> {
+        let Some(row) = self.selected_row(ignores) else {
             return Ok(());
         };
         if !row.is_dir || row.expanded {
@@ -152,8 +183,8 @@ impl FilesPanel {
     }
 
     /// `l`: expand a collapsed directory; descend into an expanded one.
-    fn expand_or_descend(&mut self) -> io::Result<()> {
-        let Some(row) = self.selected_row() else {
+    fn expand_or_descend(&mut self, ignores: &IgnoreRules) -> io::Result<()> {
+        let Some(row) = self.selected_row(ignores) else {
             return Ok(());
         };
         if !row.is_dir {
@@ -161,19 +192,19 @@ impl FilesPanel {
         }
         if row.expanded {
             // First child is the next row (if the directory is non-empty).
-            let len = self.rows().len();
+            let len = self.rows(ignores).len();
             if self.selected + 1 < len {
-                self.move_selection(1);
+                self.move_selection(1, ignores);
             }
             Ok(())
         } else {
-            self.expand_selected()
+            self.expand_selected(ignores)
         }
     }
 
     /// `h`: collapse an expanded directory; otherwise jump to the parent row.
-    fn collapse_or_parent(&mut self) {
-        let Some(row) = self.selected_row() else {
+    fn collapse_or_parent(&mut self, ignores: &IgnoreRules) {
+        let Some(row) = self.selected_row(ignores) else {
             return;
         };
         if row.is_dir && row.expanded {
@@ -184,7 +215,7 @@ impl FilesPanel {
         if let Some(parent) = row.path.parent()
             && parent.starts_with(&self.root)
             && parent != row.path
-            && let Some(index) = self.rows().iter().position(|r| r.path == parent)
+            && let Some(index) = self.rows(ignores).iter().position(|r| r.path == parent)
         {
             self.selected = index;
             self.ensure_selection_visible();
@@ -192,24 +223,24 @@ impl FilesPanel {
     }
 
     /// `Enter` on a directory: toggle expanded/collapsed.
-    fn toggle_selected_dir(&mut self) -> io::Result<()> {
-        let Some(row) = self.selected_row() else {
+    fn toggle_selected_dir(&mut self, ignores: &IgnoreRules) -> io::Result<()> {
+        let Some(row) = self.selected_row(ignores) else {
             return Ok(());
         };
         if row.expanded {
             self.expanded.remove(&row.path);
             Ok(())
         } else {
-            self.expand_selected()
+            self.expand_selected(ignores)
         }
     }
 
     fn open_selected(&mut self, app: &mut App) -> KeyResult {
-        let Some(row) = self.selected_row() else {
+        let Some(row) = self.selected_row(&app.file_ignores) else {
             return KeyResult::Consumed;
         };
         if row.is_dir {
-            if let Err(err) = self.toggle_selected_dir() {
+            if let Err(err) = self.toggle_selected_dir(&app.file_ignores) {
                 app.notifications
                     .push(Notification::error(format!("cannot read directory: {err}")));
             }
@@ -238,7 +269,7 @@ impl Layer for FilesPanel {
             &FilesPanelProps {
                 title: self.root.display().to_string(),
                 rows: self
-                    .rows()
+                    .rows(&app.file_ignores)
                     .into_iter()
                     .skip(self.offset)
                     .map(|row| RowProps {
@@ -265,22 +296,31 @@ impl Layer for FilesPanel {
         match key.code {
             KeyCode::Esc => KeyResult::Unfocus,
             KeyCode::Char('j') | KeyCode::Down => {
-                self.move_selection(1);
+                self.move_selection(1, &app.file_ignores);
                 KeyResult::Consumed
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.move_selection(-1);
+                self.move_selection(-1, &app.file_ignores);
                 KeyResult::Consumed
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                if let Err(err) = self.expand_or_descend() {
+                if let Err(err) = self.expand_or_descend(&app.file_ignores) {
                     app.notifications
                         .push(Notification::error(format!("cannot read directory: {err}")));
                 }
                 KeyResult::Consumed
             }
             KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
-                self.collapse_or_parent();
+                self.collapse_or_parent(&app.file_ignores);
+                KeyResult::Consumed
+            }
+            KeyCode::Char('I') => {
+                let show_all = self.toggle_show_all(&app.file_ignores);
+                app.notifications.push(Notification::info(if show_all {
+                    "explorer: showing all files"
+                } else {
+                    "explorer: filtered"
+                }));
                 KeyResult::Consumed
             }
             KeyCode::Enter => self.open_selected(app),
@@ -330,9 +370,13 @@ mod tests {
         (root, panel)
     }
 
-    fn names(panel: &FilesPanel) -> Vec<String> {
+    fn rules_for(root: &Path) -> IgnoreRules {
+        IgnoreRules::new(root, &[])
+    }
+
+    fn names(panel: &FilesPanel, ignores: &IgnoreRules) -> Vec<String> {
         panel
-            .rows()
+            .rows(ignores)
             .iter()
             .map(|r| format!("{}{}", "  ".repeat(r.depth), r.name))
             .collect()
@@ -341,64 +385,100 @@ mod tests {
     #[test]
     fn initial_rows_are_top_level_dirs_first() {
         let (root, panel) = test_tree();
-        assert_eq!(names(&panel), ["a_dir", "z_dir", "b.txt"]);
+        assert_eq!(
+            names(&panel, &rules_for(&root)),
+            ["a_dir", "z_dir", "b.txt"]
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn expand_reveals_children_and_collapse_hides_them() {
         let (root, mut panel) = test_tree();
-        panel.expand_selected().unwrap(); // a_dir selected (row 0)
+        let rules = rules_for(&root);
+        panel.expand_selected(&rules).unwrap(); // a_dir selected (row 0)
         assert_eq!(
-            names(&panel),
+            names(&panel, &rules),
             ["a_dir", "  a1.txt", "  a2.txt", "z_dir", "b.txt"]
         );
 
-        panel.collapse_or_parent(); // h on expanded dir collapses it
-        assert_eq!(names(&panel), ["a_dir", "z_dir", "b.txt"]);
+        panel.collapse_or_parent(&rules); // h on expanded dir collapses it
+        assert_eq!(names(&panel, &rules), ["a_dir", "z_dir", "b.txt"]);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn h_on_file_selects_parent_dir_row() {
         let (root, mut panel) = test_tree();
-        panel.expand_selected().unwrap(); // expand a_dir
-        panel.move_selection(1); // select a1.txt
-        panel.collapse_or_parent();
+        let rules = rules_for(&root);
+        panel.expand_selected(&rules).unwrap(); // expand a_dir
+        panel.move_selection(1, &rules); // select a1.txt
+        panel.collapse_or_parent(&rules);
         assert_eq!(panel.selected, 0); // back on a_dir, still expanded
-        assert!(panel.rows()[0].expanded);
+        assert!(panel.rows(&rules)[0].expanded);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn l_expands_then_descends() {
         let (root, mut panel) = test_tree();
-        panel.expand_or_descend().unwrap(); // expand a_dir
-        assert!(panel.rows()[0].expanded);
+        let rules = rules_for(&root);
+        panel.expand_or_descend(&rules).unwrap(); // expand a_dir
+        assert!(panel.rows(&rules)[0].expanded);
         assert_eq!(panel.selected, 0);
-        panel.expand_or_descend().unwrap(); // descend to first child
+        panel.expand_or_descend(&rules).unwrap(); // descend to first child
         assert_eq!(panel.selected, 1);
-        assert_eq!(panel.rows()[1].name, "a1.txt");
+        assert_eq!(panel.rows(&rules)[1].name, "a1.txt");
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn enter_toggles_directories() {
         let (root, mut panel) = test_tree();
-        panel.toggle_selected_dir().unwrap();
-        assert!(panel.rows()[0].expanded);
-        panel.toggle_selected_dir().unwrap();
-        assert!(!panel.rows()[0].expanded);
+        let rules = rules_for(&root);
+        panel.toggle_selected_dir(&rules).unwrap();
+        assert!(panel.rows(&rules)[0].expanded);
+        panel.toggle_selected_dir(&rules).unwrap();
+        assert!(!panel.rows(&rules)[0].expanded);
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn root_is_never_left() {
         let (root, mut panel) = test_tree();
+        let rules = rules_for(&root);
         // h on a top-level row: parent is the root itself — stay put.
-        panel.collapse_or_parent();
+        panel.collapse_or_parent(&rules);
         assert_eq!(panel.selected, 0);
-        assert_eq!(names(&panel), ["a_dir", "z_dir", "b.txt"]);
+        assert_eq!(names(&panel, &rules), ["a_dir", "z_dir", "b.txt"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn toggle_show_all_reveals_ignored_and_dotfiles() {
+        let (root, mut panel) = test_tree();
+        fs::create_dir_all(root.join("target")).unwrap();
+        fs::write(root.join("target/build.o"), "").unwrap();
+        fs::write(root.join(".env"), "SECRET=1").unwrap();
+        // Refresh the cached root listing (fixture wrote it before these).
+        panel
+            .cache
+            .insert(root.clone(), read_children(&root).unwrap());
+        let rules = rules_for(&root);
+
+        // filtered: no target/, no dotfiles
+        assert_eq!(names(&panel, &rules), ["a_dir", "z_dir", "b.txt"]);
+
+        // full: everything, selection clamps when shrinking back
+        assert!(panel.toggle_show_all(&rules));
+        assert_eq!(
+            names(&panel, &rules),
+            ["a_dir", "target", "z_dir", ".env", "b.txt"]
+        );
+        panel.move_selection(10, &rules);
+        assert_eq!(panel.selected, 4);
+        assert!(!panel.toggle_show_all(&rules));
+        assert!(panel.selected <= 2, "clamped into the filtered list");
         fs::remove_dir_all(root).unwrap();
     }
 }
