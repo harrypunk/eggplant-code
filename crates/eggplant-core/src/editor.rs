@@ -772,6 +772,11 @@ impl Editor {
         );
     }
 
+    /// `gg`: first line, or line `count` with a count (`5gg` → line 5).
+    pub fn move_first_line(&mut self, count: usize) {
+        self.move_to_line(count.saturating_sub(1));
+    }
+
     fn word_move(
         &mut self,
         motion: impl Fn(
@@ -1688,6 +1693,28 @@ mod tests {
             "",
             "deleting all lines leaves an empty buffer"
         );
+    }
+
+    // ---- key sequences (gg) ----
+
+    #[test]
+    fn gg_goes_to_first_line_and_counts() {
+        let mut ed = editor_with("one\ntwo\nthree\nfour");
+        ed.move_to_line(3);
+        ed.move_first_line(1); // bare gg
+        assert_eq!(ed.cursor().0, 0);
+        ed.move_first_line(3); // 3gg → line 3
+        assert_eq!(ed.cursor().0, 2);
+    }
+
+    #[test]
+    fn gg_in_visual_extends_to_the_top() {
+        let mut ed = editor_with("one\ntwo\nthree");
+        ed.move_to_line(2); // cursor col 4 (post-Esc), clamped to 2 on jump
+        ed.enter_visual();
+        ed.move_first_line(1); // gg keeps the column, like G
+        assert_eq!(ed.visual_selection_on_line(0), Some((2, 3)));
+        assert_eq!(ed.visual_selection_on_line(2), Some((0, 5)));
     }
 
     #[test]

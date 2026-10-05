@@ -22,7 +22,8 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | --- | --- |
 | `h j k l` / arrows | move |
 | `w` `e` `b` | word forward / end / backward |
-| `0` `$` `G` | line start / end / last line (`nG` → line n) |
+| `0` `$` `G` | line start / end / bottom |
+| `gg` | first line (`ngg` → line n) |
 | `5j` … | count prefixes on motions |
 | `i` `a` `o` `O` | insert / append / open below / above |
 | `v` / `V` | visual charwise / linewise: motions extend, `d`/`x`/`y` act, `v`/`V`/`Esc` exits |

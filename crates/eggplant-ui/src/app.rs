@@ -18,19 +18,22 @@ pub enum Lifecycle {
     Quitting,
 }
 
-/// Normal-mode operators that wait for a motion (`d`/`y`).
+/// Normal-mode keys that wait for a second key: the `d`/`y` operators and
+/// the `g` prefix (`gg`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operator {
+pub enum PendingKey {
     Delete,
     Yank,
+    Goto,
 }
 
-impl Operator {
-    /// The key that arms the operator (for the pending hint).
+impl PendingKey {
+    /// The key that arms it (for the pending hint).
     pub fn key(self) -> char {
         match self {
             Self::Delete => 'd',
             Self::Yank => 'y',
+            Self::Goto => 'g',
         }
     }
 }
@@ -45,7 +48,7 @@ pub struct App {
     /// Pending normal-mode input (single source of truth for the statusline's
     /// showcmd-style hint): count prefix and armed operator + its count.
     pub pending_count: Option<usize>,
-    pub pending_operator: Option<(Operator, usize)>,
+    pub pending_key: Option<(PendingKey, usize)>,
     lifecycle: Lifecycle,
     /// Demo counter for the `F3` notification-spam key (until real producers exist).
     pub tick_count: u32,
@@ -60,7 +63,7 @@ impl App {
             theme: Theme::default(),
             lifecycle: Lifecycle::Running,
             pending_count: None,
-            pending_operator: None,
+            pending_key: None,
             tick_count: 0,
         }
     }
@@ -69,7 +72,7 @@ impl App {
     /// `"5"` for a bare count, `"d"` / `"d2"` for an armed operator.
     pub fn pending_hint(&self) -> Option<String> {
         let mut hint = String::new();
-        if let Some((operator, count)) = self.pending_operator {
+        if let Some((operator, count)) = self.pending_key {
             hint.push(operator.key());
             if count > 1 {
                 hint.push_str(&count.to_string());
@@ -103,15 +106,15 @@ mod tests {
         app.pending_count = Some(5);
         assert_eq!(app.pending_hint().as_deref(), Some("5"));
 
-        app.pending_operator = Some((Operator::Delete, 1));
+        app.pending_key = Some((PendingKey::Delete, 1));
         app.pending_count = None;
         assert_eq!(app.pending_hint().as_deref(), Some("d"));
 
-        app.pending_operator = Some((Operator::Delete, 2));
+        app.pending_key = Some((PendingKey::Delete, 2));
         assert_eq!(app.pending_hint().as_deref(), Some("d2"));
 
         // Digits typed after the operator append: `d` then `3`.
-        app.pending_operator = Some((Operator::Yank, 1));
+        app.pending_key = Some((PendingKey::Yank, 1));
         app.pending_count = Some(3);
         assert_eq!(app.pending_hint().as_deref(), Some("y3"));
     }

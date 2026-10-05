@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use eggplant_core::{Mode, Motion};
 use ratatui::layout::Rect;
 
-use crate::app::{App, Operator};
+use crate::app::{App, PendingKey};
 use crate::commands::KeyStroke;
 use crate::components::editor::{self, EditorLine, EditorProps};
 use crate::components::welcome::{self, WelcomeProps};
@@ -52,13 +52,9 @@ fn line_end(app: &mut App, _: usize) -> KeyResult {
     consumed()
 }
 
-fn goto_line(app: &mut App, count: usize) -> KeyResult {
-    // Bare `G` goes to the last line; `nG` goes to line n.
-    if count > 1 {
-        app.editor.move_to_line(count - 1);
-    } else {
-        app.editor.move_last_line();
-    }
+fn goto_bottom(app: &mut App, _: usize) -> KeyResult {
+    // `G` always jumps to the bottom (`Ngg` covers counted jumps).
+    app.editor.move_last_line();
     consumed()
 }
 
@@ -69,17 +65,21 @@ fn delete_char(app: &mut App, _: usize) -> KeyResult {
 
 /// Resolve an armed operator against its motion key. Repeated operator
 /// (`dd`/`yy`) works linewise; any non-motion key cancels (vim-style).
-fn resolve_operator(operator: Operator, count: usize, key: KeyEvent, app: &mut App) -> KeyResult {
-    match (operator, plain_char(&key)) {
-        (Operator::Delete, Some('d')) => app.editor.delete_line(),
-        (Operator::Yank, Some('y')) => app.editor.yank_line(),
+fn resolve_pending(pending: PendingKey, count: usize, key: KeyEvent, app: &mut App) -> KeyResult {
+    match (pending, plain_char(&key)) {
+        (PendingKey::Delete, Some('d')) => app.editor.delete_line(),
+        (PendingKey::Yank, Some('y')) => app.editor.yank_line(),
+        (PendingKey::Goto, Some('g')) => app.editor.move_first_line(count),
         _ => {
-            // A motion resolves the operator; anything else cancels it.
-            if let Some(motion) = lookup(OPERATOR_MOTIONS, &key) {
+            // A motion resolves an operator; anything else cancels it.
+            if !matches!(pending, PendingKey::Goto)
+                && let Some(motion) = lookup(OPERATOR_MOTIONS, &key)
+            {
                 let range = app.editor.operator_range(motion, count);
-                match operator {
-                    Operator::Delete => app.editor.delete_range(range),
-                    Operator::Yank => app.editor.yank_range(range),
+                match pending {
+                    PendingKey::Delete => app.editor.delete_range(range),
+                    PendingKey::Yank => app.editor.yank_range(range),
+                    PendingKey::Goto => unreachable!(),
                 }
             }
         }
@@ -180,7 +180,7 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('b'), word_backward),
     (KeyStroke::char('0'), line_start),
     (KeyStroke::char('$'), line_end),
-    (KeyStroke::char('G'), goto_line),
+    (KeyStroke::char('G'), goto_bottom),
     (KeyStroke::char('x'), delete_char),
     (KeyStroke::char('p'), paste_after),
     (KeyStroke::char('u'), undo),
@@ -212,7 +212,7 @@ static VISUAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('b'), word_backward),
     (KeyStroke::char('0'), line_start),
     (KeyStroke::char('$'), line_end),
-    (KeyStroke::char('G'), goto_line),
+    (KeyStroke::char('G'), goto_bottom),
 ];
 
 /// Insert-mode bindings; unbound plain chars insert themselves.
@@ -322,17 +322,21 @@ impl EditorSurface {
         }
         let count = app.pending_count.take().unwrap_or(1);
         // Operator-pending: the next key resolves the operator.
-        if let Some((operator, op_count)) = app.pending_operator.take() {
-            return resolve_operator(operator, op_count * count, key, app);
+        if let Some((pending, op_count)) = app.pending_key.take() {
+            return resolve_pending(pending, op_count * count, key, app);
         }
-        // `d` / `y` arm the operator (count rides along: `2dw` == `d2w`).
+        // `d` / `y` / `g` arm a pending key (count rides along: `2dw` == `d2w`).
         match plain_char(&key) {
             Some('d') => {
-                app.pending_operator = Some((Operator::Delete, count));
+                app.pending_key = Some((PendingKey::Delete, count));
                 return KeyResult::Consumed;
             }
             Some('y') => {
-                app.pending_operator = Some((Operator::Yank, count));
+                app.pending_key = Some((PendingKey::Yank, count));
+                return KeyResult::Consumed;
+            }
+            Some('g') => {
+                app.pending_key = Some((PendingKey::Goto, count));
                 return KeyResult::Consumed;
             }
             _ => {}
@@ -358,8 +362,16 @@ impl EditorSurface {
             }
         }
         let count = app.pending_count.take().unwrap_or(1);
+        // Pending `g` prefix: `gg` extends the selection to the top.
+        if let Some((pending, op_count)) = app.pending_key.take() {
+            return resolve_pending(pending, op_count * count, key, app);
+        }
         let linewise = app.editor.mode() == Mode::VisualLine;
         match plain_char(&key) {
+            Some('g') => {
+                app.pending_key = Some((PendingKey::Goto, count));
+                return KeyResult::Consumed;
+            }
             _ if key.code == KeyCode::Esc => app.editor.enter_normal(),
             // v/V switch flavor; same key again exits (vim convention).
             Some('v') if linewise => app.editor.enter_visual(),
