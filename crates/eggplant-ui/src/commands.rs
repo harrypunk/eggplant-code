@@ -67,15 +67,15 @@ pub struct Command {
     pub execute: fn(&mut App, &mut Compositor),
 }
 
-/// Every command, plus the global keymap as (stroke → command index).
+/// Every command, plus the global keymap as (stroke → command id).
 #[derive(Default)]
 pub struct Registry {
     commands: Vec<Command>,
-    keymap: Vec<(KeyStroke, usize)>,
+    keymap: Vec<(KeyStroke, &'static str)>,
 }
 
 impl Registry {
-    pub fn new(commands: Vec<Command>, keymap: Vec<(KeyStroke, usize)>) -> Self {
+    pub fn new(commands: Vec<Command>, keymap: Vec<(KeyStroke, &'static str)>) -> Self {
         Self { commands, keymap }
     }
 
@@ -84,7 +84,7 @@ impl Registry {
         self.keymap
             .iter()
             .find(|(stroke, _)| stroke.matches(key))
-            .map(|(_, index)| self.commands[*index])
+            .and_then(|(_, id)| self.by_id(id))
     }
 
     pub fn by_id(&self, id: &str) -> Option<Command> {
@@ -283,24 +283,19 @@ pub fn default_registry() -> Registry {
             execute: demo_notification,
         },
     ];
-    // Command indices (order of the vec above):
-    //   0 app.quit  1 app.force-quit  2 file.save  3 panel.files.toggle
-    //   4 window.focus-left  5 window.focus-right  6 buffer.next  7 buffer.prev
-    //   8 buffer.close  9 file.save-quit  10 palette.open  11 which-key.open
-    //   12 theme.cycle  13 demo.dialog  14 demo.notification
     let keymap = vec![
-        (KeyStroke::ctrl('c'), 1),        // app.force-quit
-        (KeyStroke::ctrl('q'), 0),        // app.quit
-        (KeyStroke::ctrl('s'), 2),        // file.save
-        (KeyStroke::ctrl('e'), 3),        // panel.files.toggle
-        (KeyStroke::ctrl('h'), 4),        // window.focus-left
-        (KeyStroke::ctrl('l'), 5),        // window.focus-right
-        (KeyStroke::ctrl_shift('p'), 10), // palette.open
-        (KeyStroke::ctrl_shift('P'), 10), // (terminal casing varies)
-        (KeyStroke::ctrl('p'), 10),       // palette.open (fallback: no kitty protocol)
-        (KeyStroke::char(' '), 11),       // which-key.open (prefix menu)
-        (KeyStroke::function(2), 13),     // demo.dialog
-        (KeyStroke::function(3), 14),     // demo.notification
+        (KeyStroke::ctrl('c'), "app.force-quit"),
+        (KeyStroke::ctrl('q'), "app.quit"),
+        (KeyStroke::ctrl('s'), "file.save"),
+        (KeyStroke::ctrl('e'), "panel.files.toggle"),
+        (KeyStroke::ctrl('h'), "window.focus-left"),
+        (KeyStroke::ctrl('l'), "window.focus-right"),
+        (KeyStroke::ctrl_shift('p'), "palette.open"),
+        (KeyStroke::ctrl_shift('P'), "palette.open"), // terminal casing varies
+        (KeyStroke::ctrl('p'), "palette.open"),       // fallback: no kitty protocol
+        (KeyStroke::char(' '), "which-key.open"),     // prefix menu
+        (KeyStroke::function(2), "demo.dialog"),
+        (KeyStroke::function(3), "demo.notification"),
     ];
     Registry::new(commands, keymap)
 }
