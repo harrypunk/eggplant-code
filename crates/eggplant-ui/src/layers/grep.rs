@@ -26,7 +26,8 @@ pub fn buffer_grep(lines: Vec<String>) -> Picker<BufferLine> {
         project: |item| (format!(":{}", item.line + 1), item.text.clone()),
         on_select: |item, app| {
             app.editor.move_to_line(item.line);
-            KeyResult::Close
+            // Jumping to a line moves the cursor: focus follows.
+            KeyResult::CloseUnfocus
         },
     })
 }

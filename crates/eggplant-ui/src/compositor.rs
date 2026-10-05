@@ -32,6 +32,10 @@ pub enum KeyResult {
     Close,
     /// The layer asks the compositor to move focus back to the base layer.
     Unfocus,
+    /// Close this layer *and* focus the base window: for layers whose
+    /// outcome navigates the buffer (file picker, grep) — the buffer owns
+    /// the result, so it owns the focus.
+    CloseUnfocus,
     /// The layer asks the compositor to push a new layer (takes focus).
     Push(Box<dyn Layer>),
     /// Close this layer, then run a registry command.
@@ -307,6 +311,11 @@ impl Compositor {
                 self.unfocus();
                 KeyResult::Consumed
             }
+            KeyResult::CloseUnfocus => {
+                self.remove(index);
+                self.unfocus();
+                KeyResult::Consumed
+            }
             KeyResult::Push(layer) => {
                 self.push(layer);
                 KeyResult::Consumed
@@ -439,6 +448,40 @@ mod tests {
         assert_eq!(c.focused_index(), 1);
         c.focus_direction(FocusDirection::Left); // left edge: no-op
         assert_eq!(c.focused_index(), 1);
+    }
+
+    #[test]
+    fn close_unfocus_lands_on_base_not_the_previous_window() {
+        // File-picked-from-explorer scenario: panel focused, float opens,
+        // float closes with CloseUnfocus → focus = base editor, not panel.
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use eggplant_core::Editor;
+
+        struct Closer;
+        impl Layer for Closer {
+            fn view(&self, _area: Rect, _app: &App, _focused: bool) -> Element {
+                Element::Empty
+            }
+            fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {
+                KeyResult::CloseUnfocus
+            }
+            fn kind(&self) -> LayerKind {
+                LayerKind::Float
+            }
+            fn id(&self) -> &'static str {
+                "closer"
+            }
+        }
+
+        let mut app = App::new(Editor::scratch().unwrap());
+        let mut c = compositor_with_base();
+        c.push(Box::new(window(Side::Left))); // explorer focused
+        c.push(Box::new(Closer)); // float picker on top
+        assert_eq!(c.focused_index(), 2);
+
+        c.dispatch_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut app);
+        assert_eq!(c.focused_index(), 0, "buffer navigated: focus the base");
+        assert_eq!(c.layers.len(), 2, "float removed");
     }
 
     #[test]

@@ -29,7 +29,8 @@ pub fn file_picker(app: &App) -> Picker<FileEntry> {
                 app.notifications
                     .push(Notification::error(format!("open {}: {err:#}", file.rel)));
             }
-            KeyResult::Close
+            // Opening a file moves the cursor: focus follows (CloseUnfocus).
+            KeyResult::CloseUnfocus
         },
     })
 }
