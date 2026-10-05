@@ -433,7 +433,7 @@ impl Editor {
         let range = match self.mode {
             Mode::Normal => Range::new(pos, (pos + 1).min(len)),
             Mode::Insert => Range::new((pos + 1).min(len), pos),
-            Mode::Visual => {
+            Mode::Visual | Mode::VisualLine => {
                 // The fixed end as an absolute char boundary: stored in
                 // `anchor`, which is the start when forward but one past the
                 // start when backward.
@@ -523,52 +523,120 @@ impl Editor {
         if self.current.is_none() || self.mode == Mode::Visual {
             return;
         }
+        self.enter_visual_at_cursor(Mode::Visual);
+    }
+
+    /// Visual linewise mode (`V`): the selection always covers whole lines
+    /// (including their newlines); vertical motions extend by lines.
+    pub fn enter_visual_line(&mut self) {
+        if self.current.is_none() || self.mode == Mode::VisualLine {
+            return;
+        }
+        self.enter_visual_at_cursor(Mode::VisualLine);
+    }
+
+    fn enter_visual_at_cursor(&mut self, mode: Mode) {
         let pos = self.cursor_char_idx();
         let len = self.doc().text().len_chars();
         let view_id = self.view.id;
-        self.mode = Mode::Visual;
+        self.mode = mode;
         self.doc_mut()
             .expect("current buffer")
             .set_selection(view_id, Selection::single(pos, (pos + 1).min(len)));
     }
 
-    /// The selected char range (visual mode). Covers exactly the selected
-    /// chars, including the one under the cursor.
+    fn in_visual(&self) -> bool {
+        matches!(self.mode, Mode::Visual | Mode::VisualLine)
+    }
+
+    /// The selected char range in charwise visual. Covers exactly the
+    /// selected chars, including the one under the cursor.
     fn visual_char_range(&self) -> std::ops::Range<usize> {
         let primary = self.doc().selection(self.view.id).primary();
         primary.anchor.min(primary.head)..primary.anchor.max(primary.head)
     }
 
+    /// Lines spanned by the visual selection (fixed end .. cursor line).
+    fn visual_line_span(&self) -> (usize, usize) {
+        let text = self.doc().text().slice(..);
+        let primary = self.doc().selection(self.view.id).primary();
+        let fixed = if primary.head >= primary.anchor {
+            primary.anchor
+        } else {
+            primary.anchor.saturating_sub(1)
+        };
+        let cursor = self.cursor_char_idx();
+        (
+            text.char_to_line(fixed.min(cursor)),
+            text.char_to_line(fixed.max(cursor)),
+        )
+    }
+
+    /// The selected char range in linewise visual: whole lines including
+    /// their newlines (so delete/yank/paste behave like `dd`/`yy`/`p`).
+    fn visual_line_char_range(&self) -> std::ops::Range<usize> {
+        let text = self.doc().text();
+        let (lo, hi) = self.visual_line_span();
+        let start = text.line_to_char(lo);
+        let end = if hi + 1 < text.len_lines() {
+            text.line_to_char(hi + 1)
+        } else {
+            text.len_chars()
+        };
+        start..end
+    }
+
+    /// The effective selection char range for the current visual mode.
+    fn selection_range(&self) -> std::ops::Range<usize> {
+        match self.mode {
+            Mode::VisualLine => self.visual_line_char_range(),
+            _ => self.visual_char_range(),
+        }
+    }
+
     /// Visual `d`/`x`: delete the selection (also yanks), back to normal.
     pub fn delete_selection(&mut self) {
-        if self.mode != Mode::Visual || self.current.is_none() {
+        if !self.in_visual() || self.current.is_none() {
             return;
         }
-        let range = self.visual_char_range();
+        let linewise = self.mode == Mode::VisualLine;
+        let range = self.selection_range();
+        if range.is_empty() {
+            return;
+        }
+        let text = self.doc().text().slice(range.clone()).to_string();
+        self.register = Some(Register { text, linewise });
         self.mode = Mode::Normal; // before delete: cursor collapses normally
-        self.delete_range(range);
+        self.apply_delete(range);
     }
 
     /// Visual `y`: yank the selection, back to normal (cursor at its start).
     pub fn yank_selection(&mut self) {
-        if self.mode != Mode::Visual || self.current.is_none() {
+        if !self.in_visual() || self.current.is_none() {
             return;
         }
-        let range = self.visual_char_range();
+        let linewise = self.mode == Mode::VisualLine;
+        let range = self.selection_range();
+        let text = self.doc().text().slice(range.clone()).to_string();
+        self.register = Some(Register { text, linewise });
         self.mode = Mode::Normal;
-        self.yank_range(range.clone());
         self.set_cursor(range.start);
     }
 
     /// Visual selection intersected with `line`, as char columns
     /// `[start, end)`. `None` outside visual mode / off the selection.
     pub fn visual_selection_on_line(&self, line: usize) -> Option<(usize, usize)> {
-        if self.mode != Mode::Visual || self.current.is_none() {
+        if !self.in_visual() || self.current.is_none() {
             return None;
         }
         let text = self.doc().text();
         if line >= text.len_lines() {
             return None;
+        }
+        if self.mode == Mode::VisualLine {
+            let (lo, hi) = self.visual_line_span();
+            let len = self.line_char_len(line);
+            return ((lo..=hi).contains(&line) && len > 0).then_some((0, len));
         }
         let selection = self.visual_char_range();
         let line_start = text.line_to_char(line);
@@ -632,7 +700,7 @@ impl Editor {
         let start = text.line_to_char(line);
         let len = self.line_char_len(line);
         let max_col = match self.mode {
-            Mode::Normal | Mode::Visual => len.saturating_sub(1),
+            Mode::Normal | Mode::Visual | Mode::VisualLine => len.saturating_sub(1),
             Mode::Insert => len,
         };
         self.set_cursor(start + col.min(max_col));
@@ -888,6 +956,12 @@ impl Editor {
             return;
         }
         self.yank_range(range.clone()); // vim convention: delete also yanks
+        self.apply_delete(range);
+    }
+
+    /// Delete `range` (already yanked): cursor to the range start, one undo
+    /// revision.
+    fn apply_delete(&mut self, range: std::ops::Range<usize>) {
         self.apply(Transaction::delete(
             self.doc().text(),
             [(range.start, range.end)].into_iter(),
@@ -922,17 +996,7 @@ impl Editor {
             return; // phantom empty last line: nothing to delete
         }
         self.yank_line();
-        self.apply(Transaction::delete(
-            self.doc().text(),
-            [(range.start, range.end)].into_iter(),
-        ));
-        self.set_cursor(
-            range
-                .start
-                .min(self.doc().text().len_chars().saturating_sub(1)),
-        );
-        self.clamp_cursor_off_line_ending();
-        self.commit_history();
+        self.apply_delete(range);
     }
 
     /// Char range of the current line including its line ending.
@@ -1563,6 +1627,67 @@ mod tests {
         assert_eq!(ed.mode(), Mode::Normal);
         assert_eq!(ed.cursor(), (0, 3));
         assert_eq!(ed.visual_selection_on_line(0), None);
+    }
+
+    // ---- visual line mode ----
+
+    #[test]
+    fn visual_line_covers_whole_lines() {
+        let mut ed = editor_with("abc\ndef\nghi");
+        ed.move_to_line(1);
+        ed.move_right(1); // mid-line
+        ed.enter_visual_line();
+        assert_eq!(ed.mode(), Mode::VisualLine);
+        assert_eq!(ed.visual_selection_on_line(1), Some((0, 3)));
+        assert_eq!(ed.visual_selection_on_line(0), None);
+
+        ed.move_down(1); // extend over "ghi"
+        assert_eq!(ed.visual_selection_on_line(1), Some((0, 3)));
+        assert_eq!(ed.visual_selection_on_line(2), Some((0, 3)));
+    }
+
+    #[test]
+    fn visual_line_delete_removes_lines_linewise() {
+        let mut ed = editor_with("one\ntwo\nthree");
+        ed.move_to_line(0);
+        ed.enter_visual_line();
+        ed.move_down(1);
+        ed.delete_selection();
+        assert_eq!(text_of(&ed), "three\n");
+        let register = ed.register().unwrap();
+        assert!(register.linewise, "V-delete yanks linewise");
+        assert_eq!(register.text, "one\ntwo\n");
+        assert_eq!(ed.mode(), Mode::Normal);
+        assert!(ed.undo());
+        assert_eq!(text_of(&ed), "one\ntwo\nthree\n");
+    }
+
+    #[test]
+    fn visual_line_yank_then_paste_duplicates_below() {
+        let mut ed = editor_with("one\ntwo");
+        ed.move_to_line(0);
+        ed.enter_visual_line();
+        ed.yank_selection();
+        assert!(ed.register().unwrap().linewise);
+        assert_eq!(ed.mode(), Mode::Normal);
+        ed.paste_after();
+        assert_eq!(text_of(&ed), "one\none\ntwo\n");
+    }
+
+    #[test]
+    fn visual_line_extends_upwards() {
+        let mut ed = editor_with("one\ntwo\nthree");
+        ed.move_to_line(2);
+        ed.enter_visual_line();
+        ed.move_up(2);
+        assert_eq!(ed.visual_selection_on_line(0), Some((0, 3)));
+        assert_eq!(ed.visual_selection_on_line(2), Some((0, 5)));
+        ed.delete_selection();
+        assert_eq!(
+            text_of(&ed),
+            "",
+            "deleting all lines leaves an empty buffer"
+        );
     }
 
     #[test]

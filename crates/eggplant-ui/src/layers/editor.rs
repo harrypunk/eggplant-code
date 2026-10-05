@@ -135,6 +135,11 @@ fn enter_visual(app: &mut App, _: usize) -> KeyResult {
     consumed()
 }
 
+fn enter_visual_line(app: &mut App, _: usize) -> KeyResult {
+    app.editor.enter_visual_line();
+    consumed()
+}
+
 fn enter_normal(app: &mut App, _: usize) -> KeyResult {
     app.editor.enter_normal();
     consumed()
@@ -182,6 +187,7 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::ctrl('r'), redo),
     (KeyStroke::char('i'), enter_insert),
     (KeyStroke::char('v'), enter_visual),
+    (KeyStroke::char('V'), enter_visual_line),
     (KeyStroke::char('a'), enter_append),
     (KeyStroke::char('o'), open_below),
     (KeyStroke::char('O'), open_above),
@@ -352,9 +358,14 @@ impl EditorSurface {
             }
         }
         let count = app.pending_count.take().unwrap_or(1);
+        let linewise = app.editor.mode() == Mode::VisualLine;
         match plain_char(&key) {
             _ if key.code == KeyCode::Esc => app.editor.enter_normal(),
+            // v/V switch flavor; same key again exits (vim convention).
+            Some('v') if linewise => app.editor.enter_visual(),
             Some('v') => app.editor.enter_normal(),
+            Some('V') if linewise => app.editor.enter_normal(),
+            Some('V') => app.editor.enter_visual_line(),
             Some('d') | Some('x') => app.editor.delete_selection(),
             Some('y') => app.editor.yank_selection(),
             _ => {
@@ -416,7 +427,7 @@ impl Layer for EditorSurface {
         let result = match app.editor.mode() {
             Mode::Normal => self.handle_normal_key(key, app),
             Mode::Insert => self.handle_insert_key(key, app),
-            Mode::Visual => self.handle_visual_key(key, app),
+            Mode::Visual | Mode::VisualLine => self.handle_visual_key(key, app),
         };
         self.ensure_cursor_visible(app);
         result

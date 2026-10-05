@@ -5,7 +5,10 @@ pub enum Mode {
     #[default]
     Normal,
     Insert,
+    /// Charwise visual (`v`).
     Visual,
+    /// Linewise visual (`V`).
+    VisualLine,
 }
 
 impl Mode {
@@ -14,6 +17,7 @@ impl Mode {
             Mode::Normal => "NORMAL",
             Mode::Insert => "INSERT",
             Mode::Visual => "VISUAL",
+            Mode::VisualLine => "V-LINE",
         }
     }
 }

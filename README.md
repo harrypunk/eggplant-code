@@ -25,7 +25,7 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `0` `$` `G` | line start / end / last line (`nG` → line n) |
 | `5j` … | count prefixes on motions |
 | `i` `a` `o` `O` | insert / append / open below / above |
-| `v` | visual mode: motions extend, `d`/`x`/`y` act, `v`/`Esc` exits |
+| `v` / `V` | visual charwise / linewise: motions extend, `d`/`x`/`y` act, `v`/`V`/`Esc` exits |
 | `x` | delete char under cursor |
 | `d{motion}` / `dd` | delete (to motion / whole line); also yanks |
 | `y{motion}` / `yy` | yank (to motion / whole line) |
