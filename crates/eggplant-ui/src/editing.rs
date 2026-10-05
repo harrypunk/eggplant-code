@@ -21,6 +21,8 @@ pub enum PendingKey {
     Delete,
     Yank,
     Goto,
+    /// `z` prefix: view commands (`zz` center…). Not an operator.
+    View,
 }
 
 impl PendingKey {
@@ -30,6 +32,7 @@ impl PendingKey {
             Self::Delete => 'd',
             Self::Yank => 'y',
             Self::Goto => 'g',
+            Self::View => 'z',
         }
     }
 }
@@ -229,6 +232,9 @@ impl EditorAction {
 pub enum Resolved {
     /// Execute this action with this count.
     Act(EditorAction, usize),
+    /// A view (viewport) intent — interpreted by the editor surface, which
+    /// owns scroll state; `interpret_resolved` never sees these.
+    View(ViewAction),
     /// Insert-mode plain char.
     Insert(char),
     /// Operator + motion resolved (`dw`…): delete/yank the motion's range.
@@ -239,6 +245,14 @@ pub enum Resolved {
     Swallowed,
     /// Not ours — fall through (e.g. `Space` to the global keymap).
     Ignored,
+}
+
+/// Viewport intents (`zz`): the closed set of view commands. Buffer-agnostic
+/// — they move the window over the text, never the text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewAction {
+    /// Center the cursor line vertically (`zz`).
+    CenterCursor,
 }
 
 /// The narrow context actions execute against (interface segregation):
@@ -336,6 +350,7 @@ pub fn interpret_resolved(resolved: Resolved, ctx: &mut impl EditorCtx) {
             ctx.editor().yank_range(range);
         }
         Resolved::Swallowed | Resolved::Ignored => {} // key-level outcomes
+        Resolved::View(_) => {} // interpreted by the editor surface (viewport owner)
     }
 }
 
@@ -553,16 +568,17 @@ fn resolve_modal(
             (PendingKey::Delete, Some('d')) => Resolved::Act(EditorAction::DeleteLine, total),
             (PendingKey::Yank, Some('y')) => Resolved::Act(EditorAction::YankLine, total),
             (PendingKey::Goto, Some('g')) => Resolved::Act(EditorAction::MoveFirstLine, total),
+            (PendingKey::View, Some('z')) => Resolved::View(ViewAction::CenterCursor),
             _ => {
-                // A motion resolves an operator; anything else cancels it.
-                if matches!(pending_key, PendingKey::Goto) {
+                // A motion resolves an operator; prefixes cancel otherwise.
+                if matches!(pending_key, PendingKey::Goto | PendingKey::View) {
                     return Resolved::Swallowed;
                 }
                 match lookup(&keymaps.operator_motions, &key) {
                     Some(motion) => match pending_key {
                         PendingKey::Delete => Resolved::DeleteMotion(motion, total),
                         PendingKey::Yank => Resolved::YankMotion(motion, total),
-                        PendingKey::Goto => unreachable!(),
+                        PendingKey::Goto | PendingKey::View => unreachable!(),
                     },
                     None => Resolved::Swallowed, // cancelled
                 }
@@ -576,8 +592,8 @@ fn resolve_modal(
             pending.key = Some((pending_key, count));
             return Resolved::Swallowed;
         }
-    } else if plain_char(&key) == Some('g') {
-        pending.key = Some((PendingKey::Goto, count));
+    } else if let Some(prefix) = plain_char(&key).and_then(visual_prefix_key) {
+        pending.key = Some((prefix, count));
         return Resolved::Swallowed;
     }
 
@@ -596,6 +612,16 @@ fn arm_key(c: char) -> Option<PendingKey> {
         'd' => Some(PendingKey::Delete),
         'y' => Some(PendingKey::Yank),
         'g' => Some(PendingKey::Goto),
+        'z' => Some(PendingKey::View),
+        _ => None,
+    }
+}
+
+/// Visual-mode prefixes: `d`/`y` are direct bindings there; `g`/`z` arm.
+fn visual_prefix_key(c: char) -> Option<PendingKey> {
+    match c {
+        'g' => Some(PendingKey::Goto),
+        'z' => Some(PendingKey::View),
         _ => None,
     }
 }
@@ -652,6 +678,30 @@ mod tests {
         let (b, _) = resolve_normal("d2w");
         assert_eq!(a, Resolved::DeleteMotion(Motion::WordForward, 2));
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn zz_resolves_to_a_view_intent() {
+        let (resolved, pending) = resolve_normal("zz");
+        assert_eq!(resolved, Resolved::View(ViewAction::CenterCursor));
+        assert_eq!(pending.key, None);
+    }
+
+    #[test]
+    fn z_prefix_cancels_on_anything_but_z() {
+        let (resolved, pending) = resolve_normal("zx");
+        assert_eq!(resolved, Resolved::Swallowed);
+        assert_eq!(pending.key, None, "cancelled prefix is forgotten");
+    }
+
+    #[test]
+    fn zz_also_works_in_visual() {
+        let keymaps = Keymaps::default();
+        let mut pending = PendingState::default();
+        resolve(&mut pending, Mode::Visual, key('z'), &keymaps);
+        assert_eq!(pending.key, Some((PendingKey::View, 1)));
+        let resolved = resolve(&mut pending, Mode::Visual, key('z'), &keymaps);
+        assert_eq!(resolved, Resolved::View(ViewAction::CenterCursor));
     }
 
     #[test]

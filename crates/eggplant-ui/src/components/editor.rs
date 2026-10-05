@@ -88,7 +88,8 @@ pub struct EditorProps {
     pub lines: Vec<EditorLine>,
     /// First visible line, 0-based (gutter numbering base).
     pub scroll: usize,
-    /// Total document lines (drives gutter width).
+    /// User-counted document lines: drives gutter width; rows at or
+    /// beyond this render as `~` (past the file's end).
     pub line_count: usize,
     /// Cursor as (line, col) in document coordinates.
     pub cursor: (usize, usize),
@@ -103,6 +104,13 @@ pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
 
     let gutter: Vec<Line> = (props.scroll..props.scroll + props.lines.len())
         .map(|n| {
+            // Beyond the file's end: a dim `~`, no number (vim-style).
+            if n >= props.line_count {
+                return Line::from(Span::styled(
+                    format!("{:<w$} ", "~", w = gutter_width as usize - 1),
+                    base.fg(theme.comment),
+                ));
+            }
             let style = if n == cursor_line {
                 base.fg(theme.accent_alt)
             } else {
@@ -191,6 +199,36 @@ mod tests {
         }
         // syntax fg survives under the selection bg
         assert_eq!(buffer[(gutter + 3, 0)].fg, theme.syntax.function);
+    }
+
+    #[test]
+    fn rows_beyond_eof_render_tilde_without_a_number() {
+        let theme = Theme::default();
+        let empty = || EditorLine {
+            spans: Vec::new(),
+            selection: None,
+            search_marks: Vec::new(),
+            labels: Vec::new(),
+        };
+        let props = EditorProps {
+            lines: vec![empty(), empty(), empty(), empty()],
+            scroll: 0,
+            line_count: 2, // a 2-line file in a 4-row viewport
+            cursor: (1, 0),
+            dim: false,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(20, 4)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::element::paint(frame, view(&props, area, &theme), area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 0)].symbol(), "1"); // numbered
+        assert_eq!(buffer[(0, 1)].symbol(), "2"); // numbered
+        assert_eq!(buffer[(0, 2)].symbol(), "~"); // past EOF
+        assert_eq!(buffer[(0, 3)].symbol(), "~");
     }
 
     #[test]

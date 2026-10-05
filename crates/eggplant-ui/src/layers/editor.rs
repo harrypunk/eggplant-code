@@ -49,18 +49,31 @@ impl EditorSurface {
     }
 }
 
+impl EditorSurface {
+    /// `zz`: scroll so the cursor line sits at the vertical middle. No
+    /// count, no clamping against EOF — `~` rows fill past the end.
+    fn apply_view(&mut self, view: editing::ViewAction, app: &App) {
+        match view {
+            editing::ViewAction::CenterCursor => {
+                let (cursor_line, _) = app.editor.cursor();
+                self.scroll = cursor_line.saturating_sub(self.viewport_height.max(1) / 2);
+            }
+        }
+    }
+}
+
 impl Layer for EditorSurface {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         if !app.editor.has_buffer() {
             return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
         }
         let leap = app.leap.as_ref();
-        // Never number rows past the file's real end (user-counted lines).
-        let line_count = app.editor.display_line_count();
-        let visible_end = (self.scroll + area.height as usize).min(line_count);
+        // Full viewport: rows past the file's end render as `~` (vim-style)
+        // so `zz` can center even the last line. The gutter numbers only
+        // user-counted lines (display_line_count).
         editor::view(
             &EditorProps {
-                lines: (self.scroll..visible_end)
+                lines: (self.scroll..self.scroll + area.height as usize)
                     .map(|line| EditorLine {
                         spans: app.editor.highlighted_line(line),
                         selection: app.editor.visual_selection_on_line(line),
@@ -77,7 +90,7 @@ impl Layer for EditorSurface {
                     })
                     .collect(),
                 scroll: self.scroll,
-                line_count,
+                line_count: app.editor.display_line_count(),
                 cursor: app.editor.cursor(),
                 // Dim once labels are up (leap's second phase).
                 dim: leap.is_some_and(|leap| !leap.labels.is_empty()),
@@ -97,6 +110,11 @@ impl Layer for EditorSurface {
         {
             Resolved::Swallowed => KeyResult::Consumed,
             Resolved::Ignored => KeyResult::Ignored,
+            // Viewport intents belong to this layer (the scroll owner).
+            Resolved::View(view) => {
+                self.apply_view(view, app);
+                KeyResult::Consumed
+            }
             resolved => {
                 editing::interpret_resolved(resolved, app);
                 KeyResult::Consumed
@@ -112,5 +130,39 @@ impl Layer for EditorSurface {
 
     fn id(&self) -> &'static str {
         "editor"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app_with_lines(n: usize) -> App {
+        let mut app = App::new(eggplant_core::Editor::scratch().unwrap());
+        app.editor.enter_insert();
+        app.editor.insert_str(&"line\n".repeat(n));
+        app.editor.enter_normal();
+        app
+    }
+
+    #[test]
+    fn zz_centers_the_cursor_line() {
+        let mut app = app_with_lines(20);
+        let mut surface = EditorSurface::new();
+        surface.viewport_height = 5;
+
+        app.editor.move_to_line(10);
+        surface.apply_view(editing::ViewAction::CenterCursor, &app);
+        assert_eq!(surface.scroll, 8, "cursor 10, half-viewport 2");
+
+        // Near the top the scroll clamps at 0 (saturating).
+        app.editor.move_to_line(1);
+        surface.apply_view(editing::ViewAction::CenterCursor, &app);
+        assert_eq!(surface.scroll, 0);
+
+        // Near EOF it centers too — `~` rows fill past the end.
+        app.editor.move_to_line(19);
+        surface.apply_view(editing::ViewAction::CenterCursor, &app);
+        assert_eq!(surface.scroll, 17);
     }
 }

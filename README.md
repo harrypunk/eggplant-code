@@ -24,6 +24,7 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `w` `e` `b` | word forward / end / backward |
 | `0` `$` `G` | line start / end / bottom |
 | `gg` | first line (`ngg` → line n) |
+| `zz` | center the cursor line vertically |
 | `n` / `N` | next / previous search match |
 | `Esc` | clear search highlight |
 | `5j` … | count prefixes on motions |
