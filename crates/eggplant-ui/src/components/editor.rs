@@ -9,14 +9,17 @@ use crate::element::Element;
 use crate::theme::Theme;
 
 /// One visible document line: highlighted spans + optional visual selection
-/// as char columns `[start, end)`.
+/// as char columns `[start, end)`, plus search marks `(start, end,
+/// is_current)`.
 pub struct EditorLine {
     pub spans: Vec<HighlightedSpan>,
     pub selection: Option<(usize, usize)>,
+    pub search_marks: Vec<(usize, usize, bool)>,
 }
 
-/// Build a display line: syntax colors, with the visual selection painted
-/// as a background band (splitting spans at the selection boundaries).
+/// Build a display line: syntax colors, with search matches and the visual
+/// selection painted as background bands (selection wins over search,
+/// current match over plain matches).
 fn style_line(line: &EditorLine, theme: &Theme) -> Line<'static> {
     // Flatten to per-char (char, scope) cells, then group consecutive cells
     // with equal style into spans. Visible lines are short — clarity wins.
@@ -29,10 +32,25 @@ fn style_line(line: &EditorLine, theme: &Theme) -> Line<'static> {
         line.selection
             .is_some_and(|(start, end)| (start..end).contains(&col))
     };
+    let search_bg = |col: usize| {
+        line.search_marks
+            .iter()
+            .find(|(start, end, _)| (*start..*end).contains(&col))
+            .map(|(_, _, current)| {
+                if *current {
+                    theme.search_current
+                } else {
+                    theme.search_match
+                }
+            })
+    };
 
     let mut spans: Vec<Span> = Vec::new();
     for (col, (c, scope)) in cells.iter().enumerate() {
         let mut style = theme.scope_style(*scope);
+        if let Some(bg) = search_bg(col) {
+            style = style.bg(bg);
+        }
         if selected(col) {
             style = style.bg(theme.selection);
         }
@@ -127,6 +145,7 @@ mod tests {
                     },
                 ],
                 selection: Some((2, 5)), // covers " m a i" — splits both spans
+                search_marks: Vec::new(),
             }],
             scroll: 0,
             line_count: 1,
@@ -148,5 +167,43 @@ mod tests {
         }
         // syntax fg survives under the selection bg
         assert_eq!(buffer[(gutter + 3, 0)].fg, theme.syntax.function);
+    }
+
+    #[test]
+    fn search_marks_paint_backgrounds_current_distinct() {
+        let theme = Theme::default();
+        let props = EditorProps {
+            lines: vec![EditorLine {
+                spans: vec![HighlightedSpan {
+                    text: "foo foo".to_owned(),
+                    scope: None,
+                }],
+                selection: None,
+                search_marks: vec![(0, 3, false), (4, 7, true)],
+            }],
+            scroll: 0,
+            line_count: 1,
+            cursor: (0, 4),
+        };
+        let mut terminal = Terminal::new(TestBackend::new(20, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::element::paint(frame, view(&props, area, &theme), area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let gutter = 2u16;
+        for x in gutter..gutter + 3 {
+            assert_eq!(buffer[(x, 0)].bg, theme.search_match, "col {x} plain match");
+        }
+        assert_eq!(buffer[(gutter + 3, 0)].bg, theme.bg, "space unmarked");
+        for x in gutter + 4..gutter + 7 {
+            assert_eq!(
+                buffer[(x, 0)].bg,
+                theme.search_current,
+                "col {x} current match"
+            );
+        }
     }
 }

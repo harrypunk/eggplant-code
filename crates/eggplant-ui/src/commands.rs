@@ -12,6 +12,7 @@ use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::notification::Notification;
 use crate::layers::palette::Palette;
+use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
 use crate::theme::Theme;
 
@@ -171,6 +172,15 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
             },
         ],
     },
+    KeyNode::Group {
+        key: 's',
+        description: "+search",
+        children: &[KeyNode::Leaf {
+            key: 'b',
+            description: "in buffer",
+            command: "search.buffer",
+        }],
+    },
     KeyNode::Leaf {
         key: 'q',
         description: "quit",
@@ -257,6 +267,11 @@ pub fn default_registry() -> Registry {
             execute: |app, compositor| {
                 compositor.push(Box::new(Palette::new(app.registry.commands().to_vec())));
             },
+        },
+        Command {
+            id: "search.buffer",
+            description: "Search in buffer (live, n/N cycle)",
+            execute: |_app, compositor| compositor.push(Box::new(SearchPrompt::new())),
         },
         Command {
             id: "which-key.open",

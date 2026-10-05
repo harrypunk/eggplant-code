@@ -92,6 +92,20 @@ fn paste_after(app: &mut App, _: usize) -> KeyResult {
     consumed()
 }
 
+fn next_search_match(app: &mut App, count: usize) -> KeyResult {
+    for _ in 0..count {
+        app.editor.next_search_match();
+    }
+    consumed()
+}
+
+fn prev_search_match(app: &mut App, count: usize) -> KeyResult {
+    for _ in 0..count {
+        app.editor.prev_search_match();
+    }
+    consumed()
+}
+
 fn undo(app: &mut App, _: usize) -> KeyResult {
     if !app.editor.undo() {
         app.notifications
@@ -183,6 +197,8 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('G'), goto_bottom),
     (KeyStroke::char('x'), delete_char),
     (KeyStroke::char('p'), paste_after),
+    (KeyStroke::char('n'), next_search_match),
+    (KeyStroke::char('N'), prev_search_match),
     (KeyStroke::char('u'), undo),
     (KeyStroke::ctrl('r'), redo),
     (KeyStroke::char('i'), enter_insert),
@@ -325,6 +341,11 @@ impl EditorSurface {
         if let Some((pending, op_count)) = app.pending_key.take() {
             return resolve_pending(pending, op_count * count, key, app);
         }
+        if key.code == KeyCode::Esc {
+            app.editor.clear_search();
+            return consumed();
+        }
+
         // `d` / `y` / `g` arm a pending key (count rides along: `2dw` == `d2w`).
         match plain_char(&key) {
             Some('d') => {
@@ -419,6 +440,7 @@ impl Layer for EditorSurface {
                     .map(|line| EditorLine {
                         spans: app.editor.highlighted_line(line),
                         selection: app.editor.visual_selection_on_line(line),
+                        search_marks: app.editor.search_marks_on_line(line),
                     })
                     .collect(),
                 scroll: self.scroll,

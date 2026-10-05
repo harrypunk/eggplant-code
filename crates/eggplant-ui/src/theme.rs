@@ -37,6 +37,10 @@ pub struct Theme {
     pub comment: Color,
     /// Selected row / current-line background.
     pub selection: Color,
+    /// Search match background (vim hlsearch).
+    pub search_match: Color,
+    /// The current search match (the one `n`/`N` sit on).
+    pub search_current: Color,
     /// Primary accent: focused borders, prompts.
     pub accent: Color,
     /// Secondary accent: current line number, focus tags.
@@ -64,6 +68,8 @@ pub const TOKYO_NIGHT: Theme = Theme {
     fg: rgb(0xc0, 0xca, 0xf5),
     comment: rgb(0x56, 0x5f, 0x89),
     selection: rgb(0x29, 0x2e, 0x42),
+    search_match: rgb(0x3d, 0x47, 0x59),
+    search_current: rgb(0xe0, 0xaf, 0x68),
     accent: rgb(0x7a, 0xa2, 0xf7),
     accent_alt: rgb(0xe0, 0xaf, 0x68),
     surface: rgb(0x1f, 0x23, 0x35),
@@ -95,6 +101,8 @@ pub const CLASSIC: Theme = Theme {
     fg: Color::Reset,
     comment: Color::DarkGray,
     selection: Color::DarkGray,
+    search_match: Color::DarkGray,
+    search_current: Color::Yellow,
     accent: Color::Cyan,
     accent_alt: Color::Yellow,
     surface: Color::Black,

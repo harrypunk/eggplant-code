@@ -86,7 +86,21 @@ impl Backend {
 
 /// An open document plus its per-buffer state.
 struct Buffer {
+    /// Unique identity: helix's `DocumentId::default` is always 1 (helix's
+    /// own editor assigns unique ids; ours doesn't), so we track our own.
+    slot: usize,
     doc: Document,
+}
+
+/// Live buffer-search state (`Space s b`, vim `/`-style): all matches as
+/// sorted char ranges plus the index `n`/`N` cycle from.
+#[derive(Debug, Clone)]
+struct Search {
+    /// Slot of the buffer the matches belong to (stale searches render
+    /// nothing).
+    buffer: usize,
+    matches: Vec<std::ops::Range<usize>>,
+    current: usize,
 }
 
 /// The yank register: text plus whether it was taken linewise (`yy`/`dd`).
@@ -129,8 +143,8 @@ fn relative_display(path: &std::path::Path) -> String {
 }
 
 impl Buffer {
-    fn new(doc: Document) -> Self {
-        Self { doc }
+    fn new(doc: Document, slot: usize) -> Self {
+        Self { slot, doc }
     }
 
     fn display_name(&self) -> String {
@@ -154,6 +168,8 @@ pub struct BufferInfo {
 
 pub struct Editor {
     buffers: Vec<Buffer>,
+    /// Next unique buffer slot (monotonic; survives buffer closes).
+    next_slot: usize,
     /// Index of the current buffer in `buffers`.
     /// Index of the current buffer; `None` when no buffer is open.
     current: Option<usize>,
@@ -165,6 +181,8 @@ pub struct Editor {
     generation: usize,
     /// The yank register (shared across buffers, vim-style).
     register: Option<Register>,
+    /// Live search matches (`None` = no active search).
+    search: Option<Search>,
     backend: Backend,
 }
 
@@ -173,25 +191,27 @@ impl Editor {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let backend = Backend::new()?;
         let doc = backend.open_document(path.as_ref())?;
-        Ok(Self::new(Buffer::new(doc), backend))
+        Ok(Self::new(Buffer::new(doc, 0), backend))
     }
 
     /// A new empty scratch document.
     pub fn scratch() -> Result<Self> {
         let backend = Backend::new()?;
         let doc = backend.scratch_document();
-        Ok(Self::new(Buffer::new(doc), backend))
+        Ok(Self::new(Buffer::new(doc, 0), backend))
     }
 
     /// No buffers at all (directory startup: explorer + empty editor).
     pub fn empty() -> Result<Self> {
         Ok(Self {
             buffers: Vec::new(),
+            next_slot: 0,
             current: None,
             view: View::new(DocumentId::default(), GutterConfig::default()),
             mode: Mode::Normal,
             generation: 0,
             register: None,
+            search: None,
             backend: Backend::new()?,
         })
     }
@@ -200,11 +220,13 @@ impl Editor {
         let view = View::new(buffer.doc.id(), GutterConfig::default());
         let mut editor = Self {
             buffers: vec![buffer],
+            next_slot: 1,
             current: Some(0),
             view,
             mode: Mode::Normal,
             generation: 0,
             register: None,
+            search: None,
             backend,
         };
         editor.reset_cursor();
@@ -269,7 +291,9 @@ impl Editor {
             return Ok(());
         }
         let doc = self.backend.open_document(path)?;
-        self.buffers.push(Buffer::new(doc));
+        let slot = self.next_slot;
+        self.next_slot += 1;
+        self.buffers.push(Buffer::new(doc, slot));
         self.current = Some(self.buffers.len() - 1);
         self.reset_cursor();
         self.generation += 1;
@@ -799,12 +823,134 @@ impl Editor {
         self.set_cursor(target(text, new));
     }
 
+    // ---- search ----
+
+    /// Set/replace the search pattern (live, incsearch-style): find all
+    /// matches, jump the cursor to the first one at/after it (wrapping),
+    /// return the match count. An empty pattern clears the search.
+    pub fn search(&mut self, pattern: &str) -> usize {
+        if self.current.is_none() || pattern.is_empty() {
+            self.search = None;
+            return 0;
+        }
+        let rope = self.doc().text();
+        let haystack = rope.slice(..).to_string();
+        let matches: Vec<std::ops::Range<usize>> = haystack
+            .match_indices(pattern)
+            .map(|(byte, m)| {
+                let start = rope.byte_to_char(byte);
+                start..start + m.chars().count()
+            })
+            .collect();
+        if matches.is_empty() {
+            self.search = None;
+            return 0;
+        }
+        let cursor = self.cursor_char_idx();
+        let current = matches.iter().position(|m| m.start >= cursor).unwrap_or(0);
+        let count = matches.len();
+        self.search = Some(Search {
+            buffer: self.buffers[self.current.expect("checked")].slot,
+            matches,
+            current,
+        });
+        self.jump_to_search_match();
+        count
+    }
+
+    /// `n`: jump to the next match (wraps). No-op without an active search.
+    pub fn next_search_match(&mut self) {
+        self.cycle_search_match(1);
+    }
+
+    /// `N`: jump to the previous match (wraps).
+    pub fn prev_search_match(&mut self) {
+        self.cycle_search_match(-1);
+    }
+
+    fn cycle_search_match(&mut self, delta: isize) {
+        if self.current.is_none() {
+            return;
+        }
+        if self
+            .search
+            .as_ref()
+            .is_some_and(|s| Some(s.buffer) != self.current_slot())
+        {
+            self.search = None; // stale: belongs to another buffer
+            return;
+        }
+        let Some(search) = &mut self.search else {
+            return;
+        };
+        let len = search.matches.len() as isize;
+        let next = (search.current as isize + delta).rem_euclid(len) as usize;
+        let pos = search.matches[next].start;
+        search.current = next;
+        self.set_cursor(pos);
+        self.clamp_cursor_off_line_ending();
+    }
+
+    fn jump_to_search_match(&mut self) {
+        let pos = self.search.as_ref().map(|s| s.matches[s.current].start);
+        if let Some(pos) = pos {
+            self.set_cursor(pos);
+            self.clamp_cursor_off_line_ending();
+        }
+    }
+
+    /// Slot of the current buffer (`None` when bufferless).
+    fn current_slot(&self) -> Option<usize> {
+        self.current.map(|i| self.buffers[i].slot)
+    }
+
+    /// Clear the search highlight (`Esc`).
+    pub fn clear_search(&mut self) {
+        self.search = None;
+    }
+
+    /// Whether a search is active on the current buffer.
+    pub fn has_search(&self) -> bool {
+        self.current.is_some()
+            && self
+                .search
+                .as_ref()
+                .is_some_and(|s| Some(s.buffer) == self.current_slot())
+    }
+
+    /// Search matches intersecting `line` as char columns
+    /// `(start, end, is_current)`. Empty outside an active search.
+    pub fn search_marks_on_line(&self, line: usize) -> Vec<(usize, usize, bool)> {
+        if !self.has_search() {
+            return Vec::new();
+        }
+        let text = self.doc().text();
+        if line >= text.len_lines() {
+            return Vec::new();
+        }
+        let line_start = text.line_to_char(line);
+        let line_end = line_start + self.line_char_len(line);
+        let search = self.search.as_ref().expect("has_search checked");
+        search
+            .matches
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| {
+                let start = m.start.max(line_start);
+                let end = m.end.min(line_end);
+                // Lazy: the subtractions only hold inside the intersection.
+                (start < end).then(|| (start - line_start, end - line_start, i == search.current))
+            })
+            .collect()
+    }
+
     // ---- edits ----
 
     fn apply(&mut self, transaction: Transaction) {
         if self.current.is_none() {
             return;
         }
+        self.search = None; // edits invalidate match positions
         let view_id = self.view.id;
         let doc = self.doc_mut().expect("current buffer");
         // `Document::apply` also incrementally reparses the syntax tree.
@@ -1717,6 +1863,103 @@ mod tests {
         assert_eq!(ed.visual_selection_on_line(2), Some((0, 5)));
     }
 
+    // ---- search ----
+
+    #[test]
+    fn search_finds_all_matches_and_jumps_incsearch_style() {
+        let mut ed = editor_with("foo bar foo\nbaz foo");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        assert_eq!(ed.search("foo"), 3);
+        assert_eq!(ed.cursor(), (0, 0), "first match at/after cursor");
+        assert!(ed.has_search());
+        // line 0: "foo bar foo" → matches at cols 0..3 and 8..11
+        assert_eq!(
+            ed.search_marks_on_line(0),
+            vec![(0, 3, true), (8, 11, false)]
+        );
+        assert_eq!(ed.search_marks_on_line(1), vec![(4, 7, false)]);
+    }
+
+    #[test]
+    fn search_cycles_with_wraparound() {
+        let mut ed = editor_with("a x\nx b\nc x");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.search("x");
+        assert_eq!(ed.cursor(), (0, 2));
+        ed.next_search_match();
+        assert_eq!(ed.cursor(), (1, 0));
+        ed.next_search_match();
+        assert_eq!(ed.cursor(), (2, 2));
+        ed.next_search_match();
+        assert_eq!(ed.cursor(), (0, 2), "wraps to first");
+        ed.prev_search_match();
+        assert_eq!(ed.cursor(), (2, 2), "N wraps to last");
+        // the current mark follows the cursor
+        assert_eq!(ed.search_marks_on_line(2), vec![(2, 3, true)]);
+    }
+
+    #[test]
+    fn search_starts_from_cursor_position() {
+        let mut ed = editor_with("foo foo foo");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.move_right(5); // past the second foo's start
+        ed.search("foo");
+        assert_eq!(ed.cursor(), (0, 8), "lands on next match, not first");
+    }
+
+    #[test]
+    fn search_empty_or_missing_pattern_clears() {
+        let mut ed = editor_with("hello");
+        assert_eq!(ed.search("zzz"), 0);
+        assert!(!ed.has_search());
+        ed.search("ell");
+        assert!(ed.has_search());
+        ed.search("");
+        assert!(!ed.has_search());
+        assert_eq!(ed.search_marks_on_line(0), Vec::new());
+    }
+
+    #[test]
+    fn search_is_invalidated_by_edits_and_cleared_on_esc() {
+        let mut ed = editor_with("foo foo");
+        ed.search("foo");
+        assert!(ed.has_search());
+        ed.enter_insert();
+        ed.insert_char('x');
+        ed.enter_normal();
+        assert!(!ed.has_search(), "edits drop stale match positions");
+
+        ed.search("foo");
+        ed.clear_search();
+        assert!(!ed.has_search());
+    }
+
+    #[test]
+    fn search_marks_nothing_on_other_buffers() {
+        let mut ed = editor_with("foo");
+        ed.search("foo");
+        let other = temp_file("other.txt", "foo foo");
+        ed.open_buffer(&other).unwrap();
+        assert!(!ed.has_search());
+        assert_eq!(ed.search_marks_on_line(0), Vec::new());
+    }
+
+    #[test]
+    fn dbg_search_buffer_ids() {
+        let mut ed = editor_with("foo");
+        ed.search("foo");
+        let other = temp_file("other2.txt", "foo foo");
+        ed.open_buffer(&other).unwrap();
+        eprintln!("has_search={}", ed.has_search());
+        eprintln!(
+            "current={:?} buffers={}",
+            ed.current_buffer(),
+            ed.buffer_count()
+        );
+    }
     #[test]
     fn next_prev_buffer_wraps() {
         let path_a = temp_file("wrap-a", "a");
