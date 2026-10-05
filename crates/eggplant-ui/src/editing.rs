@@ -79,8 +79,6 @@ pub enum EditorAction {
     DeleteChar,
     DeleteLine,
     YankLine,
-    DeleteMotion(Motion),
-    YankMotion(Motion),
     PasteAfter,
     NextSearchMatch,
     PrevSearchMatch,
@@ -102,14 +100,140 @@ pub enum EditorAction {
     Newline,
     DeleteBackward,
     DeleteForward,
-    Insert(char),
 }
 
-/// What a keypress resolved to.
+impl EditorAction {
+    /// Every action — the registry auto-registers these as `edit.*`
+    /// commands, so palette/keymaps/modal keys share one dispatch path.
+    pub const ALL: &'static [EditorAction] = &[
+        EditorAction::MoveLeft,
+        EditorAction::MoveRight,
+        EditorAction::MoveUp,
+        EditorAction::MoveDown,
+        EditorAction::WordForward,
+        EditorAction::WordEnd,
+        EditorAction::WordBackward,
+        EditorAction::LineStart,
+        EditorAction::LineEnd,
+        EditorAction::GotoBottom,
+        EditorAction::MoveFirstLine,
+        EditorAction::DeleteChar,
+        EditorAction::DeleteLine,
+        EditorAction::YankLine,
+        EditorAction::PasteAfter,
+        EditorAction::NextSearchMatch,
+        EditorAction::PrevSearchMatch,
+        EditorAction::ClearSearch,
+        EditorAction::Undo,
+        EditorAction::Redo,
+        EditorAction::EnterInsert,
+        EditorAction::EnterAppend,
+        EditorAction::OpenBelow,
+        EditorAction::OpenAbove,
+        EditorAction::EnterVisual,
+        EditorAction::EnterVisualLine,
+        EditorAction::ExitToNormal,
+        EditorAction::VisualCharOrExit,
+        EditorAction::VisualLineOrExit,
+        EditorAction::DeleteSelection,
+        EditorAction::YankSelection,
+        EditorAction::Newline,
+        EditorAction::DeleteBackward,
+        EditorAction::DeleteForward,
+    ];
+
+    /// Stable registry id (`keys.toml` will bind these by name).
+    pub fn id(self) -> &'static str {
+        match self {
+            EditorAction::MoveLeft => "edit.move-left",
+            EditorAction::MoveRight => "edit.move-right",
+            EditorAction::MoveUp => "edit.move-up",
+            EditorAction::MoveDown => "edit.move-down",
+            EditorAction::WordForward => "edit.word-forward",
+            EditorAction::WordEnd => "edit.word-end",
+            EditorAction::WordBackward => "edit.word-backward",
+            EditorAction::LineStart => "edit.line-start",
+            EditorAction::LineEnd => "edit.line-end",
+            EditorAction::GotoBottom => "edit.goto-bottom",
+            EditorAction::MoveFirstLine => "edit.goto-first-line",
+            EditorAction::DeleteChar => "edit.delete-char",
+            EditorAction::DeleteLine => "edit.delete-line",
+            EditorAction::YankLine => "edit.yank-line",
+            EditorAction::PasteAfter => "edit.paste-after",
+            EditorAction::NextSearchMatch => "edit.next-search-match",
+            EditorAction::PrevSearchMatch => "edit.prev-search-match",
+            EditorAction::ClearSearch => "edit.clear-search",
+            EditorAction::Undo => "edit.undo",
+            EditorAction::Redo => "edit.redo",
+            EditorAction::EnterInsert => "edit.enter-insert",
+            EditorAction::EnterAppend => "edit.enter-append",
+            EditorAction::OpenBelow => "edit.open-below",
+            EditorAction::OpenAbove => "edit.open-above",
+            EditorAction::EnterVisual => "edit.enter-visual",
+            EditorAction::EnterVisualLine => "edit.enter-visual-line",
+            EditorAction::ExitToNormal => "edit.exit-to-normal",
+            EditorAction::VisualCharOrExit => "edit.visual-char-or-exit",
+            EditorAction::VisualLineOrExit => "edit.visual-line-or-exit",
+            EditorAction::DeleteSelection => "edit.delete-selection",
+            EditorAction::YankSelection => "edit.yank-selection",
+            EditorAction::Newline => "edit.newline",
+            EditorAction::DeleteBackward => "edit.delete-backward",
+            EditorAction::DeleteForward => "edit.delete-forward",
+        }
+    }
+
+    /// Human description (palette/which-key).
+    pub fn description(self) -> &'static str {
+        match self {
+            EditorAction::MoveLeft => "Move left",
+            EditorAction::MoveRight => "Move right",
+            EditorAction::MoveUp => "Move up",
+            EditorAction::MoveDown => "Move down",
+            EditorAction::WordForward => "Word forward",
+            EditorAction::WordEnd => "Word end",
+            EditorAction::WordBackward => "Word backward",
+            EditorAction::LineStart => "Line start",
+            EditorAction::LineEnd => "Line end",
+            EditorAction::GotoBottom => "Goto bottom",
+            EditorAction::MoveFirstLine => "Goto first line",
+            EditorAction::DeleteChar => "Delete char",
+            EditorAction::DeleteLine => "Delete line",
+            EditorAction::YankLine => "Yank line",
+            EditorAction::PasteAfter => "Paste after",
+            EditorAction::NextSearchMatch => "Next search match",
+            EditorAction::PrevSearchMatch => "Previous search match",
+            EditorAction::ClearSearch => "Clear search highlight",
+            EditorAction::Undo => "Undo",
+            EditorAction::Redo => "Redo",
+            EditorAction::EnterInsert => "Enter insert mode",
+            EditorAction::EnterAppend => "Enter insert mode (append)",
+            EditorAction::OpenBelow => "Open line below",
+            EditorAction::OpenAbove => "Open line above",
+            EditorAction::EnterVisual => "Enter visual mode",
+            EditorAction::EnterVisualLine => "Enter visual line mode",
+            EditorAction::ExitToNormal => "Exit to normal mode",
+            EditorAction::VisualCharOrExit => "Visual charwise / exit",
+            EditorAction::VisualLineOrExit => "Visual linewise / exit",
+            EditorAction::DeleteSelection => "Delete selection",
+            EditorAction::YankSelection => "Yank selection",
+            EditorAction::Newline => "Insert newline",
+            EditorAction::DeleteBackward => "Delete backward",
+            EditorAction::DeleteForward => "Delete forward",
+        }
+    }
+}
+
+/// What a keypress resolved to. Payload-carrying outcomes live here (not
+/// in `EditorAction`) so the action set stays closed and registrable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resolved {
     /// Execute this action with this count.
     Act(EditorAction, usize),
+    /// Insert-mode plain char.
+    Insert(char),
+    /// Operator + motion resolved (`dw`…): delete/yank the motion's range.
+    DeleteMotion(Motion, usize),
+    YankMotion(Motion, usize),
     /// Input swallowed without an action: digit accumulated, operator armed
     /// or cancelled.
     Swallowed,
@@ -145,14 +269,6 @@ pub fn interpret(action: EditorAction, count: usize, ctx: &mut impl EditorCtx) {
         }
         EditorAction::DeleteLine => ctx.editor().delete_line(),
         EditorAction::YankLine => ctx.editor().yank_line(),
-        EditorAction::DeleteMotion(motion) => {
-            let range = ctx.editor().operator_range(motion, count);
-            ctx.editor().delete_range(range);
-        }
-        EditorAction::YankMotion(motion) => {
-            let range = ctx.editor().operator_range(motion, count);
-            ctx.editor().yank_range(range);
-        }
         EditorAction::PasteAfter => ctx.editor().paste_after(),
         EditorAction::NextSearchMatch => {
             for _ in 0..count {
@@ -200,7 +316,26 @@ pub fn interpret(action: EditorAction, count: usize, ctx: &mut impl EditorCtx) {
         EditorAction::YankSelection => ctx.editor().yank_selection(),
         EditorAction::Newline => ctx.editor().insert_newline(),
         EditorAction::DeleteBackward => ctx.editor().delete_backward(),
-        EditorAction::Insert(c) => ctx.editor().insert_char(c),
+    }
+}
+
+/// Execute a resolution with a payload (or a plain action). The single
+/// funnel for edit semantics: the modal layer calls this, and so does the
+/// registry's `CommandKind::Edit` dispatch — nothing else touches the
+/// facade from the UI crate.
+pub fn interpret_resolved(resolved: Resolved, ctx: &mut impl EditorCtx) {
+    match resolved {
+        Resolved::Act(action, count) => interpret(action, count, ctx),
+        Resolved::Insert(c) => ctx.editor().insert_char(c),
+        Resolved::DeleteMotion(motion, count) => {
+            let range = ctx.editor().operator_range(motion, count);
+            ctx.editor().delete_range(range);
+        }
+        Resolved::YankMotion(motion, count) => {
+            let range = ctx.editor().operator_range(motion, count);
+            ctx.editor().yank_range(range);
+        }
+        Resolved::Swallowed | Resolved::Ignored => {} // key-level outcomes
     }
 }
 
@@ -344,7 +479,7 @@ fn resolve_insert(key: KeyEvent) -> Resolved {
     match lookup(INSERT_KEYMAP, &key) {
         Some(action) => Resolved::Act(action, 1),
         None => match plain_char(&key) {
-            Some(c) => Resolved::Act(EditorAction::Insert(c), 1),
+            Some(c) => Resolved::Insert(c),
             None => Resolved::Ignored,
         },
     }
@@ -376,14 +511,11 @@ fn resolve_modal(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resol
                     return Resolved::Swallowed;
                 }
                 match lookup(OPERATOR_MOTIONS, &key) {
-                    Some(motion) => Resolved::Act(
-                        match pending_key {
-                            PendingKey::Delete => EditorAction::DeleteMotion(motion),
-                            PendingKey::Yank => EditorAction::YankMotion(motion),
-                            PendingKey::Goto => unreachable!(),
-                        },
-                        total,
-                    ),
+                    Some(motion) => match pending_key {
+                        PendingKey::Delete => Resolved::DeleteMotion(motion, total),
+                        PendingKey::Yank => Resolved::YankMotion(motion, total),
+                        PendingKey::Goto => unreachable!(),
+                    },
                     None => Resolved::Swallowed, // cancelled
                 }
             }
@@ -464,18 +596,12 @@ mod tests {
         assert_eq!(resolved, Resolved::Act(EditorAction::DeleteLine, 1));
 
         let (resolved, _) = resolve_normal("dw");
-        assert_eq!(
-            resolved,
-            Resolved::Act(EditorAction::DeleteMotion(Motion::WordForward), 1)
-        );
+        assert_eq!(resolved, Resolved::DeleteMotion(Motion::WordForward, 1));
 
         // Counts compose either way: 2dw == d2w.
         let (a, _) = resolve_normal("2dw");
         let (b, _) = resolve_normal("d2w");
-        assert_eq!(
-            a,
-            Resolved::Act(EditorAction::DeleteMotion(Motion::WordForward), 2)
-        );
+        assert_eq!(a, Resolved::DeleteMotion(Motion::WordForward, 2));
         assert_eq!(a, b);
     }
 
@@ -520,7 +646,7 @@ mod tests {
         let mut pending = PendingState::default();
         assert_eq!(
             resolve(&mut pending, Mode::Insert, key('x')),
-            Resolved::Act(EditorAction::Insert('x'), 1)
+            Resolved::Insert('x')
         );
     }
 

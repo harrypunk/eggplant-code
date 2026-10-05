@@ -13,7 +13,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 
 use crate::app::App;
-use crate::commands::Command;
+use crate::commands::{Command, CommandKind};
 use crate::element::{self, Element};
 use crate::statusline;
 use crate::topbar;
@@ -282,6 +282,16 @@ impl Compositor {
 
     /// Send a key to the focused layer, applying any structural request or
     /// effect (close/unfocus/push/execute/ex) it returns.
+    /// Execute a command: the single dispatch path for palette, which-key,
+    /// global keymap — and modal actions (`Edit` funnels into
+    /// `editing::interpret`, the same path modal keys use).
+    pub fn execute(&mut self, command: Command, app: &mut App) {
+        match command.kind {
+            CommandKind::App(f) => f(app, self),
+            CommandKind::Edit(action) => crate::editing::interpret(action, 1, app),
+        }
+    }
+
     pub fn dispatch_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
         let index = self.focused_index();
         let Some(layer) = self.layers.get_mut(index) else {
@@ -303,7 +313,7 @@ impl Compositor {
             }
             KeyResult::Execute(command) => {
                 self.remove(index);
-                (command.execute)(app, self);
+                self.execute(command, app);
                 KeyResult::Consumed
             }
             other => other,

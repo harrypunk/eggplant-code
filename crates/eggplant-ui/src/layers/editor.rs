@@ -91,12 +91,12 @@ impl Layer for EditorSurface {
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
         let result = match editing::resolve(&mut app.pending, app.editor.mode(), key) {
-            Resolved::Act(action, count) => {
-                editing::interpret(action, count, app);
-                KeyResult::Consumed
-            }
             Resolved::Swallowed => KeyResult::Consumed,
             Resolved::Ignored => KeyResult::Ignored,
+            resolved => {
+                editing::interpret_resolved(resolved, app);
+                KeyResult::Consumed
+            }
         };
         self.ensure_cursor_visible(app);
         result

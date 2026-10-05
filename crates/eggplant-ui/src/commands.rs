@@ -9,6 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::app::App;
 use crate::app::Leap;
 use crate::compositor::{Compositor, FocusDirection};
+use crate::editing::EditorAction;
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::leap::LeapLayer;
@@ -62,12 +63,53 @@ impl KeyStroke {
     }
 }
 
-/// A named application action, invocable by key, palette, or `:` alias.
+/// How a command executes. Both kinds funnel through one dispatch
+/// (`Compositor::execute`): the palette, the which-key tree, global keys,
+/// and modal editing never call implementations directly.
+#[derive(Clone, Copy)]
+pub enum CommandKind {
+    /// App-level: layers, windows, quit, save, … (runs with the compositor).
+    App(fn(&mut App, &mut Compositor)),
+    /// Modal edit action, interpreted via `editing::interpret` (the same
+    /// funnel modal keys use).
+    Edit(EditorAction),
+}
+
+/// A named application action, invocable by key, palette, or which-key leaf.
 #[derive(Clone, Copy)]
 pub struct Command {
     pub id: &'static str,
     pub description: &'static str,
-    pub execute: fn(&mut App, &mut Compositor),
+    pub kind: CommandKind,
+    /// Listed in the command palette? Low-level `edit.*` commands are
+    /// registered (keybindable, single dispatch) but not listed — modal keys
+    /// are their home.
+    pub palette: bool,
+}
+
+impl Command {
+    const fn app(
+        id: &'static str,
+        description: &'static str,
+        f: fn(&mut App, &mut Compositor),
+    ) -> Self {
+        Self {
+            id,
+            description,
+            kind: CommandKind::App(f),
+            palette: true,
+        }
+    }
+
+    /// Auto-registered edit action: id/description come from the action.
+    fn edit(action: EditorAction) -> Self {
+        Self {
+            id: action.id(),
+            description: action.description(),
+            kind: CommandKind::Edit(action),
+            palette: false,
+        }
+    }
 }
 
 /// Every command, plus the global keymap as (stroke → command id).
@@ -224,122 +266,112 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
 /// The default registry: all global commands + their key bindings.
 pub fn default_registry() -> Registry {
     let commands = vec![
-        Command {
-            id: "app.quit",
-            description: "Quit (confirms on unsaved changes)",
-            execute: quit,
-        },
-        Command {
-            id: "app.force-quit",
-            description: "Quit immediately without saving",
-            execute: force_quit,
-        },
-        Command {
-            id: "file.save",
-            description: "Save the current buffer",
-            execute: save_with_notification,
-        },
-        Command {
-            id: "panel.files.toggle",
-            description: "Toggle file explorer",
-            execute: toggle_files_panel,
-        },
-        Command {
-            id: "window.focus-left",
-            description: "Focus window to the left",
-            execute: focus_left,
-        },
-        Command {
-            id: "window.focus-right",
-            description: "Focus window to the right",
-            execute: focus_right,
-        },
-        Command {
-            id: "buffer.next",
-            description: "Switch to next buffer",
-            execute: |app, _| app.editor.next_buffer(),
-        },
-        Command {
-            id: "buffer.prev",
-            description: "Switch to previous buffer",
-            execute: |app, _| app.editor.prev_buffer(),
-        },
-        Command {
-            id: "buffer.close",
-            description: "Close the current buffer (fails on unsaved changes)",
-            execute: |app, _| {
+        Command::app("app.quit", "Quit (confirms on unsaved changes)", quit),
+        Command::app(
+            "app.force-quit",
+            "Quit immediately without saving",
+            force_quit,
+        ),
+        Command::app(
+            "file.save",
+            "Save the current buffer",
+            save_with_notification,
+        ),
+        Command::app(
+            "panel.files.toggle",
+            "Toggle file explorer",
+            toggle_files_panel,
+        ),
+        Command::app("window.focus-left", "Focus window to the left", focus_left),
+        Command::app(
+            "window.focus-right",
+            "Focus window to the right",
+            focus_right,
+        ),
+        Command::app("buffer.next", "Switch to next buffer", |app, _| {
+            app.editor.next_buffer()
+        }),
+        Command::app("buffer.prev", "Switch to previous buffer", |app, _| {
+            app.editor.prev_buffer()
+        }),
+        Command::app(
+            "buffer.close",
+            "Close the current buffer (fails on unsaved changes)",
+            |app, _| {
                 if let Err(err) = app.editor.close_current_buffer(false) {
                     app.notifications
                         .push(Notification::error(format!("{err:#}")));
                 }
             },
-        },
-        Command {
-            id: "file.save-quit",
-            description: "Save the current buffer, then quit",
-            execute: |app, compositor| match app.editor.save() {
+        ),
+        Command::app(
+            "file.save-quit",
+            "Save the current buffer, then quit",
+            |app, compositor| match app.editor.save() {
                 Ok(()) => quit(app, compositor),
                 Err(err) => app
                     .notifications
                     .push(Notification::error(format!("save failed: {err:#}"))),
             },
-        },
-        Command {
-            id: "palette.open",
-            description: "Open the command palette",
-            execute: |app, compositor| {
+        ),
+        Command::app(
+            "palette.open",
+            "Open the command palette",
+            |app, compositor| {
                 compositor.push(Box::new(palette::command_palette(
                     app.registry.commands().to_vec(),
                 )));
             },
-        },
-        Command {
-            id: "search.buffer",
-            description: "Search in buffer (live, n/N cycle)",
-            execute: |_app, compositor| compositor.push(Box::new(SearchPrompt::new())),
-        },
-        Command {
-            id: "goto.char",
-            description: "Leap to a 2-char pattern",
-            execute: |app, compositor| {
+        ),
+        Command::app(
+            "search.buffer",
+            "Search in buffer (live, n/N cycle)",
+            |_app, compositor| compositor.push(Box::new(SearchPrompt::new())),
+        ),
+        Command::app(
+            "goto.char",
+            "Leap to a 2-char pattern",
+            |app, compositor| {
                 if app.editor.has_buffer() {
                     app.leap = Some(Leap::default());
                     compositor.push(Box::new(LeapLayer));
                 }
             },
-        },
-        Command {
-            id: "search.lines",
-            description: "Grep lines in buffer (live)",
-            execute: |app, compositor| {
+        ),
+        Command::app(
+            "search.lines",
+            "Grep lines in buffer (live)",
+            |app, compositor| {
                 compositor.push(Box::new(grep::buffer_grep(app.editor.buffer_lines())));
             },
-        },
-        Command {
-            id: "which-key.open",
-            description: "Open the key-hints menu (Space prefix)",
-            execute: |_, compositor| compositor.push(Box::new(WhichKey::root())),
-        },
-        Command {
-            id: "theme.cycle",
-            description: "Cycle to the next color theme",
-            execute: |app, _| {
-                app.theme = Theme::next_after(app.theme.name);
-                app.notifications
-                    .push(Notification::info(format!("theme: {}", app.theme.name)));
-            },
-        },
-        Command {
-            id: "demo.dialog",
-            description: "Toggle demo floating dialog",
-            execute: toggle_demo_dialog,
-        },
-        Command {
-            id: "demo.notification",
-            description: "Spawn a demo notification",
-            execute: demo_notification,
-        },
+        ),
+        Command::app(
+            "which-key.open",
+            "Open the key-hints menu (Space prefix)",
+            |_, compositor| compositor.push(Box::new(WhichKey::root())),
+        ),
+        Command::app("theme.cycle", "Cycle to the next color theme", |app, _| {
+            app.theme = Theme::next_after(app.theme.name);
+            app.notifications
+                .push(Notification::info(format!("theme: {}", app.theme.name)));
+        }),
+        Command::app(
+            "demo.dialog",
+            "Toggle demo floating dialog",
+            toggle_demo_dialog,
+        ),
+        Command::app(
+            "demo.notification",
+            "Spawn a demo notification",
+            demo_notification,
+        ),
     ];
+    // Every modal edit action registers as an `edit.*` command: one
+    // dispatch path for palette / which-key / global keys / modal editing.
+    let commands: Vec<Command> = commands
+        .into_iter()
+        .chain(EditorAction::ALL.iter().map(|a| Command::edit(*a)))
+        .collect();
     let keymap = vec![
         (KeyStroke::ctrl('c'), "app.force-quit"),
         (KeyStroke::ctrl('q'), "app.quit"),
@@ -451,5 +483,34 @@ mod tests {
         let stroke = KeyStroke::char('h');
         let ctrl_h = KeyEvent::new(KeyCode::Char('h'), KeyModifiers::CONTROL);
         assert!(!stroke.matches(&ctrl_h));
+    }
+
+    #[test]
+    fn every_edit_action_is_registered_but_palette_hidden() {
+        let registry = default_registry();
+        for action in EditorAction::ALL {
+            let command = registry
+                .by_id(action.id())
+                .unwrap_or_else(|| panic!("{} not registered", action.id()));
+            assert_eq!(command.description, action.description());
+            assert!(matches!(command.kind, CommandKind::Edit(a) if a == *action));
+            assert!(!command.palette, "{} stays out of the palette", action.id());
+        }
+    }
+
+    #[test]
+    fn every_which_key_leaf_resolves_to_a_command() {
+        fn walk(nodes: &[KeyNode], registry: &Registry) {
+            for node in nodes {
+                match node {
+                    KeyNode::Leaf { command, .. } => assert!(
+                        registry.by_id(command).is_some(),
+                        "which-key leaf '{command}' has no command"
+                    ),
+                    KeyNode::Group { children, .. } => walk(children, registry),
+                }
+            }
+        }
+        walk(WHICH_KEY_ROOT, &default_registry());
     }
 }

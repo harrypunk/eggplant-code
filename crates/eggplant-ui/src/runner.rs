@@ -78,6 +78,6 @@ fn dispatch_key(key: KeyEvent, app: &mut App, compositor: &mut Compositor) {
     if matches!(compositor.dispatch_key(key, app), KeyResult::Ignored)
         && let Some(command) = app.registry.lookup_key(&key)
     {
-        (command.execute)(app, compositor);
+        compositor.execute(command, app);
     }
 }
