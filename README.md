@@ -49,6 +49,7 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 Explorer keys: `j`/`k` move, `l`/`h` expand / collapse-or-parent, `Enter`
 open file / toggle directory, `I` toggle full / filtered listing (filtered
 hides dotfiles + ignore-rule matches — the same rules as the picker).
+`C-h`/`C-l` move focus between explorer and editor like any window split.
 
 ### Keybinding levels
 

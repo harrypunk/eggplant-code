@@ -12,7 +12,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
@@ -293,6 +293,14 @@ impl Layer for FilesPanel {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+        // Plain letters only: Ctrl/Alt-modified keys (C-l, C-h…) belong to
+        // the global keymap (window focus moves through the panel too).
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return KeyResult::Ignored;
+        }
         match key.code {
             KeyCode::Esc => KeyResult::Unfocus,
             KeyCode::Char('j') | KeyCode::Down => {
@@ -451,6 +459,29 @@ mod tests {
         panel.collapse_or_parent(&rules);
         assert_eq!(panel.selected, 0);
         assert_eq!(names(&panel, &rules), ["a_dir", "z_dir", "b.txt"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn ctrl_modified_keys_fall_through_to_global_keymap() {
+        // C-l is Char('l') + CONTROL: without the guard the panel eats it
+        // as "expand" and window focus can never move right out of the
+        // explorer.
+        let (root, mut panel) = test_tree();
+        let mut app = App::new(eggplant_core::Editor::scratch().unwrap());
+
+        let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
+        assert!(matches!(
+            panel.handle_key(ctrl_l, &mut app),
+            KeyResult::Ignored
+        ));
+
+        let plain_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
+        assert!(matches!(
+            panel.handle_key(plain_l, &mut app),
+            KeyResult::Consumed
+        ));
+        assert!(panel.rows(&rules_for(&root))[0].expanded);
         fs::remove_dir_all(root).unwrap();
     }
 
