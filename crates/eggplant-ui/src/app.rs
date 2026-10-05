@@ -3,7 +3,8 @@
 use eggplant_core::Editor;
 
 use crate::commands::{self, Registry};
-use crate::layers::notification::Notifications;
+use crate::editing::{EditorCtx, PendingState};
+use crate::layers::notification::{Notification, Notifications};
 use crate::theme::Theme;
 
 /// Application lifecycle status. Not a `bool`: quitting is a state
@@ -34,26 +35,6 @@ pub struct Leap {
     pub labels: Vec<LeapLabel>,
 }
 
-/// Normal-mode keys that wait for a second key: the `d`/`y` operators and
-/// the `g` prefix (`gg`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PendingKey {
-    Delete,
-    Yank,
-    Goto,
-}
-
-impl PendingKey {
-    /// The key that arms it (for the pending hint).
-    pub fn key(self) -> char {
-        match self {
-            Self::Delete => 'd',
-            Self::Yank => 'y',
-            Self::Goto => 'g',
-        }
-    }
-}
-
 pub struct App {
     pub editor: Editor,
     pub notifications: Notifications,
@@ -61,10 +42,9 @@ pub struct App {
     pub registry: Registry,
     /// Active color theme (components read it via props adapters).
     pub theme: Theme,
-    /// Pending normal-mode input (single source of truth for the statusline's
-    /// showcmd-style hint): count prefix and armed operator + its count.
-    pub pending_count: Option<usize>,
-    pub pending_key: Option<(PendingKey, usize)>,
+    /// Pending modal input (counts, armed operators) — the statusline's
+    /// showcmd-style hint reads it; `editing::resolve` mutates it.
+    pub pending: PendingState,
     /// Leap-jump in progress (Space g c).
     pub leap: Option<Leap>,
     lifecycle: Lifecycle,
@@ -80,27 +60,15 @@ impl App {
             registry: commands::default_registry(),
             theme: Theme::default(),
             lifecycle: Lifecycle::Running,
-            pending_count: None,
-            pending_key: None,
+            pending: PendingState::default(),
             leap: None,
             tick_count: 0,
         }
     }
 
-    /// The pending-input hint for the statusline (vim `showcmd` style):
-    /// `"5"` for a bare count, `"d"` / `"d2"` for an armed operator.
+    /// The pending-input hint for the statusline (vim `showcmd` style).
     pub fn pending_hint(&self) -> Option<String> {
-        let mut hint = String::new();
-        if let Some((operator, count)) = self.pending_key {
-            hint.push(operator.key());
-            if count > 1 {
-                hint.push_str(&count.to_string());
-            }
-        }
-        if let Some(count) = self.pending_count {
-            hint.push_str(&count.to_string());
-        }
-        (!hint.is_empty()).then_some(hint)
+        self.pending.hint()
     }
 
     /// Request application shutdown (the event loop observes and exits).
@@ -113,6 +81,16 @@ impl App {
     }
 }
 
+impl EditorCtx for App {
+    fn editor(&mut self) -> &mut Editor {
+        &mut self.editor
+    }
+
+    fn notify(&mut self, message: &str) {
+        self.notifications.push(Notification::info(message));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,19 +100,21 @@ mod tests {
         let mut app = App::new(Editor::scratch().unwrap());
         assert_eq!(app.pending_hint(), None);
 
-        app.pending_count = Some(5);
+        use crate::editing::PendingKey;
+
+        app.pending.count = Some(5);
         assert_eq!(app.pending_hint().as_deref(), Some("5"));
 
-        app.pending_key = Some((PendingKey::Delete, 1));
-        app.pending_count = None;
+        app.pending.key = Some((PendingKey::Delete, 1));
+        app.pending.count = None;
         assert_eq!(app.pending_hint().as_deref(), Some("d"));
 
-        app.pending_key = Some((PendingKey::Delete, 2));
+        app.pending.key = Some((PendingKey::Delete, 2));
         assert_eq!(app.pending_hint().as_deref(), Some("d2"));
 
         // Digits typed after the operator append: `d` then `3`.
-        app.pending_key = Some((PendingKey::Yank, 1));
-        app.pending_count = Some(3);
+        app.pending.key = Some((PendingKey::Yank, 1));
+        app.pending.count = Some(3);
         assert_eq!(app.pending_hint().as_deref(), Some("y3"));
     }
 }

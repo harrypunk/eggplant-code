@@ -1,0 +1,562 @@
+//! Modal editing, Redux-style: keys resolve to **actions** (data), actions
+//! are **interpreted** against a narrow context (interface).
+//!
+//! Three separated concerns:
+//! - keymaps (`NORMAL_KEYMAP` / `VISUAL_KEYMAP` / `INSERT_KEYMAP`) are pure
+//!   tables — binding *policy*, later loadable from a config file;
+//! - [`resolve`] is the input state machine (count prefixes, armed
+//!   operators) — the only place pending input lives;
+//! - [`interpret`] executes one action against [`EditorCtx`] — editing
+//!   *semantics*, one flat match, testable without `App`.
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::{Editor, Mode, Motion};
+
+use crate::commands::KeyStroke;
+
+/// Normal-mode keys that wait for a second key: the `d`/`y` operators and
+/// the `g` prefix (`gg`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingKey {
+    Delete,
+    Yank,
+    Goto,
+}
+
+impl PendingKey {
+    /// The key that arms it (for the pending hint).
+    pub fn key(self) -> char {
+        match self {
+            Self::Delete => 'd',
+            Self::Yank => 'y',
+            Self::Goto => 'g',
+        }
+    }
+}
+
+/// Pending modal input: count prefix and armed operator + its count.
+/// Kept in `App` (the statusline's showcmd-style hint reads it).
+#[derive(Debug, Default)]
+pub struct PendingState {
+    pub count: Option<usize>,
+    pub key: Option<(PendingKey, usize)>,
+}
+
+impl PendingState {
+    /// Vim `showcmd`-style hint: `"5"` for a bare count, `"d"` / `"d2"` for
+    /// an armed operator.
+    pub fn hint(&self) -> Option<String> {
+        let mut hint = String::new();
+        if let Some((operator, count)) = self.key {
+            hint.push(operator.key());
+            if count > 1 {
+                hint.push_str(&count.to_string());
+            }
+        }
+        if let Some(count) = self.count {
+            hint.push_str(&count.to_string());
+        }
+        (!hint.is_empty()).then_some(hint)
+    }
+}
+
+/// A semantic editing intent — what a key *means*, independent of which key
+/// produced it. The closed set of things the editor can be asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorAction {
+    MoveLeft,
+    MoveRight,
+    MoveUp,
+    MoveDown,
+    WordForward,
+    WordEnd,
+    WordBackward,
+    LineStart,
+    LineEnd,
+    GotoBottom,
+    /// `gg`: first line, or line `count` with a count.
+    MoveFirstLine,
+    DeleteChar,
+    DeleteLine,
+    YankLine,
+    DeleteMotion(Motion),
+    YankMotion(Motion),
+    PasteAfter,
+    NextSearchMatch,
+    PrevSearchMatch,
+    ClearSearch,
+    Undo,
+    Redo,
+    EnterInsert,
+    EnterAppend,
+    OpenBelow,
+    OpenAbove,
+    EnterVisual,
+    EnterVisualLine,
+    ExitToNormal,
+    /// `v` in visual mode: switch charwise/linewise, or exit (vim toggle).
+    VisualCharOrExit,
+    VisualLineOrExit,
+    DeleteSelection,
+    YankSelection,
+    Newline,
+    DeleteBackward,
+    DeleteForward,
+    Insert(char),
+}
+
+/// What a keypress resolved to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolved {
+    /// Execute this action with this count.
+    Act(EditorAction, usize),
+    /// Input swallowed without an action: digit accumulated, operator armed
+    /// or cancelled.
+    Swallowed,
+    /// Not ours — fall through (e.g. `Space` to the global keymap).
+    Ignored,
+}
+
+/// The narrow context actions execute against (interface segregation):
+/// editing semantics need the buffer facade and a notification sink —
+/// nothing else.
+pub trait EditorCtx {
+    fn editor(&mut self) -> &mut Editor;
+    fn notify(&mut self, message: &str);
+}
+
+/// Execute one action. All arms converge on the facade; the multi-step ones
+/// (`open_below`, visual flavor toggles) live here and nowhere else.
+pub fn interpret(action: EditorAction, count: usize, ctx: &mut impl EditorCtx) {
+    match action {
+        EditorAction::MoveLeft => ctx.editor().move_left(count),
+        EditorAction::MoveRight => ctx.editor().move_right(count),
+        EditorAction::MoveUp => ctx.editor().move_up(count),
+        EditorAction::MoveDown => ctx.editor().move_down(count),
+        EditorAction::WordForward => ctx.editor().move_word_forward(count),
+        EditorAction::WordEnd => ctx.editor().move_word_end(count),
+        EditorAction::WordBackward => ctx.editor().move_word_backward(count),
+        EditorAction::LineStart => ctx.editor().move_line_start(),
+        EditorAction::LineEnd => ctx.editor().move_line_end(),
+        EditorAction::GotoBottom => ctx.editor().move_last_line(),
+        EditorAction::MoveFirstLine => ctx.editor().move_first_line(count),
+        EditorAction::DeleteChar | EditorAction::DeleteForward => {
+            ctx.editor().delete_char_at_cursor()
+        }
+        EditorAction::DeleteLine => ctx.editor().delete_line(),
+        EditorAction::YankLine => ctx.editor().yank_line(),
+        EditorAction::DeleteMotion(motion) => {
+            let range = ctx.editor().operator_range(motion, count);
+            ctx.editor().delete_range(range);
+        }
+        EditorAction::YankMotion(motion) => {
+            let range = ctx.editor().operator_range(motion, count);
+            ctx.editor().yank_range(range);
+        }
+        EditorAction::PasteAfter => ctx.editor().paste_after(),
+        EditorAction::NextSearchMatch => {
+            for _ in 0..count {
+                ctx.editor().next_search_match();
+            }
+        }
+        EditorAction::PrevSearchMatch => {
+            for _ in 0..count {
+                ctx.editor().prev_search_match();
+            }
+        }
+        EditorAction::ClearSearch => ctx.editor().clear_search(),
+        EditorAction::Undo => {
+            if !ctx.editor().undo() {
+                ctx.notify("already at oldest change");
+            }
+        }
+        EditorAction::Redo => {
+            if !ctx.editor().redo() {
+                ctx.notify("already at newest change");
+            }
+        }
+        EditorAction::EnterInsert => ctx.editor().enter_insert(),
+        EditorAction::EnterAppend => ctx.editor().enter_append(),
+        EditorAction::OpenBelow => {
+            ctx.editor().open_line_below();
+            ctx.editor().enter_insert();
+        }
+        EditorAction::OpenAbove => {
+            ctx.editor().open_line_above();
+            ctx.editor().enter_insert();
+        }
+        EditorAction::EnterVisual => ctx.editor().enter_visual(),
+        EditorAction::EnterVisualLine => ctx.editor().enter_visual_line(),
+        EditorAction::ExitToNormal => ctx.editor().enter_normal(),
+        EditorAction::VisualCharOrExit => match ctx.editor().mode() {
+            Mode::VisualLine => ctx.editor().enter_visual(),
+            _ => ctx.editor().enter_normal(),
+        },
+        EditorAction::VisualLineOrExit => match ctx.editor().mode() {
+            Mode::VisualLine => ctx.editor().enter_normal(),
+            _ => ctx.editor().enter_visual_line(),
+        },
+        EditorAction::DeleteSelection => ctx.editor().delete_selection(),
+        EditorAction::YankSelection => ctx.editor().yank_selection(),
+        EditorAction::Newline => ctx.editor().insert_newline(),
+        EditorAction::DeleteBackward => ctx.editor().delete_backward(),
+        EditorAction::Insert(c) => ctx.editor().insert_char(c),
+    }
+}
+
+// ---- keymaps (binding policy as data) ----
+
+const NONE: KeyModifiers = KeyModifiers::NONE;
+
+/// Normal mode. Digits, `d`/`y`/`g` arming are resolved before lookup.
+/// `Space` is deliberately unbound: it falls through to the global keymap.
+static NORMAL_KEYMAP: &[(KeyStroke, EditorAction)] = &[
+    (KeyStroke::char('h'), EditorAction::MoveLeft),
+    (KeyStroke::new(KeyCode::Left, NONE), EditorAction::MoveLeft),
+    (KeyStroke::char('j'), EditorAction::MoveDown),
+    (KeyStroke::new(KeyCode::Down, NONE), EditorAction::MoveDown),
+    (KeyStroke::char('k'), EditorAction::MoveUp),
+    (KeyStroke::new(KeyCode::Up, NONE), EditorAction::MoveUp),
+    (KeyStroke::char('l'), EditorAction::MoveRight),
+    (
+        KeyStroke::new(KeyCode::Right, NONE),
+        EditorAction::MoveRight,
+    ),
+    (KeyStroke::char('w'), EditorAction::WordForward),
+    (KeyStroke::char('e'), EditorAction::WordEnd),
+    (KeyStroke::char('b'), EditorAction::WordBackward),
+    (KeyStroke::char('0'), EditorAction::LineStart),
+    (KeyStroke::char('$'), EditorAction::LineEnd),
+    (KeyStroke::char('G'), EditorAction::GotoBottom),
+    (KeyStroke::char('x'), EditorAction::DeleteChar),
+    (KeyStroke::char('p'), EditorAction::PasteAfter),
+    (KeyStroke::char('n'), EditorAction::NextSearchMatch),
+    (KeyStroke::char('N'), EditorAction::PrevSearchMatch),
+    (KeyStroke::char('u'), EditorAction::Undo),
+    (KeyStroke::ctrl('r'), EditorAction::Redo),
+    (KeyStroke::char('i'), EditorAction::EnterInsert),
+    (KeyStroke::char('v'), EditorAction::EnterVisual),
+    (KeyStroke::char('V'), EditorAction::EnterVisualLine),
+    (KeyStroke::char('a'), EditorAction::EnterAppend),
+    (KeyStroke::char('o'), EditorAction::OpenBelow),
+    (KeyStroke::char('O'), EditorAction::OpenAbove),
+    (
+        KeyStroke::new(KeyCode::Esc, NONE),
+        EditorAction::ClearSearch,
+    ),
+];
+
+/// Visual mode: motions extend the selection; `d`/`x`/`y` act on it.
+static VISUAL_KEYMAP: &[(KeyStroke, EditorAction)] = &[
+    (KeyStroke::char('h'), EditorAction::MoveLeft),
+    (KeyStroke::new(KeyCode::Left, NONE), EditorAction::MoveLeft),
+    (KeyStroke::char('j'), EditorAction::MoveDown),
+    (KeyStroke::new(KeyCode::Down, NONE), EditorAction::MoveDown),
+    (KeyStroke::char('k'), EditorAction::MoveUp),
+    (KeyStroke::new(KeyCode::Up, NONE), EditorAction::MoveUp),
+    (KeyStroke::char('l'), EditorAction::MoveRight),
+    (
+        KeyStroke::new(KeyCode::Right, NONE),
+        EditorAction::MoveRight,
+    ),
+    (KeyStroke::char('w'), EditorAction::WordForward),
+    (KeyStroke::char('e'), EditorAction::WordEnd),
+    (KeyStroke::char('b'), EditorAction::WordBackward),
+    (KeyStroke::char('0'), EditorAction::LineStart),
+    (KeyStroke::char('$'), EditorAction::LineEnd),
+    (KeyStroke::char('G'), EditorAction::GotoBottom),
+    (KeyStroke::char('d'), EditorAction::DeleteSelection),
+    (KeyStroke::char('x'), EditorAction::DeleteSelection),
+    (KeyStroke::char('y'), EditorAction::YankSelection),
+    (KeyStroke::char('v'), EditorAction::VisualCharOrExit),
+    (KeyStroke::char('V'), EditorAction::VisualLineOrExit),
+    (
+        KeyStroke::new(KeyCode::Esc, NONE),
+        EditorAction::ExitToNormal,
+    ),
+];
+
+/// Insert mode; unbound plain chars insert themselves.
+static INSERT_KEYMAP: &[(KeyStroke, EditorAction)] = &[
+    (
+        KeyStroke::new(KeyCode::Esc, NONE),
+        EditorAction::ExitToNormal,
+    ),
+    (KeyStroke::new(KeyCode::Enter, NONE), EditorAction::Newline),
+    (
+        KeyStroke::new(KeyCode::Backspace, NONE),
+        EditorAction::DeleteBackward,
+    ),
+    (
+        KeyStroke::new(KeyCode::Delete, NONE),
+        EditorAction::DeleteForward,
+    ),
+    (KeyStroke::new(KeyCode::Left, NONE), EditorAction::MoveLeft),
+    (
+        KeyStroke::new(KeyCode::Right, NONE),
+        EditorAction::MoveRight,
+    ),
+    (KeyStroke::new(KeyCode::Up, NONE), EditorAction::MoveUp),
+    (KeyStroke::new(KeyCode::Down, NONE), EditorAction::MoveDown),
+];
+
+/// Motions an operator consumes (`dw`, `y$`, …).
+static OPERATOR_MOTIONS: &[(KeyStroke, Motion)] = &[
+    (KeyStroke::char('w'), Motion::WordForward),
+    (KeyStroke::char('e'), Motion::WordEnd),
+    (KeyStroke::char('b'), Motion::WordBackward),
+    (KeyStroke::char('0'), Motion::LineStart),
+    (KeyStroke::char('$'), Motion::LineEnd),
+    (KeyStroke::char('h'), Motion::Left),
+    (KeyStroke::new(KeyCode::Left, NONE), Motion::Left),
+    (KeyStroke::char('l'), Motion::Right),
+    (KeyStroke::new(KeyCode::Right, NONE), Motion::Right),
+];
+
+fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
+    keymap
+        .iter()
+        .find(|(stroke, _)| stroke.matches(key))
+        .map(|(_, command)| *command)
+}
+
+/// Plain character keys only — Ctrl/Alt combos fall through to globals.
+fn plain_char(key: &KeyEvent) -> Option<char> {
+    match key.code {
+        KeyCode::Char(c) if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            Some(c)
+        }
+        _ => None,
+    }
+}
+
+/// The modal input state machine: fold a keypress (plus pending state) into
+/// a resolution. Counts and armed operators live here and nowhere else.
+pub fn resolve(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resolved {
+    match mode {
+        Mode::Insert => resolve_insert(key),
+        Mode::Normal => resolve_modal(pending, Mode::Normal, key),
+        Mode::Visual | Mode::VisualLine => resolve_modal(pending, Mode::Visual, key),
+    }
+}
+
+fn resolve_insert(key: KeyEvent) -> Resolved {
+    match lookup(INSERT_KEYMAP, &key) {
+        Some(action) => Resolved::Act(action, 1),
+        None => match plain_char(&key) {
+            Some(c) => Resolved::Act(EditorAction::Insert(c), 1),
+            None => Resolved::Ignored,
+        },
+    }
+}
+
+/// Normal and visual share the machinery; `Mode` picks the keymap and
+/// whether `d`/`y` arm operators (visual binds them directly).
+fn resolve_modal(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resolved {
+    // Count prefix: digits accumulate (`0` is a motion when no count yet).
+    if let Some(digit @ ('1'..='9' | '0')) = plain_char(&key) {
+        let d = digit.to_digit(10).unwrap() as usize;
+        if d > 0 || pending.count.is_some() {
+            pending.count = Some(pending.count.unwrap_or(0) * 10 + d);
+            return Resolved::Swallowed;
+        }
+    }
+    let count = pending.count.take().unwrap_or(1);
+
+    // Operator-pending: this key resolves the operator.
+    if let Some((pending_key, op_count)) = pending.key.take() {
+        let total = op_count * count;
+        return match (pending_key, plain_char(&key)) {
+            (PendingKey::Delete, Some('d')) => Resolved::Act(EditorAction::DeleteLine, total),
+            (PendingKey::Yank, Some('y')) => Resolved::Act(EditorAction::YankLine, total),
+            (PendingKey::Goto, Some('g')) => Resolved::Act(EditorAction::MoveFirstLine, total),
+            _ => {
+                // A motion resolves an operator; anything else cancels it.
+                if matches!(pending_key, PendingKey::Goto) {
+                    return Resolved::Swallowed;
+                }
+                match lookup(OPERATOR_MOTIONS, &key) {
+                    Some(motion) => Resolved::Act(
+                        match pending_key {
+                            PendingKey::Delete => EditorAction::DeleteMotion(motion),
+                            PendingKey::Yank => EditorAction::YankMotion(motion),
+                            PendingKey::Goto => unreachable!(),
+                        },
+                        total,
+                    ),
+                    None => Resolved::Swallowed, // cancelled
+                }
+            }
+        };
+    }
+
+    // `d`/`y`/`g` arm a pending key (visual binds its own `d`/`y` directly).
+    if mode == Mode::Normal {
+        if let Some(pending_key) = plain_char(&key).and_then(arm_key) {
+            pending.key = Some((pending_key, count));
+            return Resolved::Swallowed;
+        }
+    } else if plain_char(&key) == Some('g') {
+        pending.key = Some((PendingKey::Goto, count));
+        return Resolved::Swallowed;
+    }
+
+    let keymap = match mode {
+        Mode::Normal => NORMAL_KEYMAP,
+        _ => VISUAL_KEYMAP,
+    };
+    match lookup(keymap, &key) {
+        Some(action) => Resolved::Act(action, count),
+        None => Resolved::Ignored, // dead key; count already dropped
+    }
+}
+
+fn arm_key(c: char) -> Option<PendingKey> {
+    match c {
+        'd' => Some(PendingKey::Delete),
+        'y' => Some(PendingKey::Yank),
+        'g' => Some(PendingKey::Goto),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn resolve_normal(keys: &str) -> (Resolved, PendingState) {
+        let mut pending = PendingState::default();
+        let mut last = Resolved::Ignored;
+        for c in keys.chars() {
+            last = resolve(&mut pending, Mode::Normal, key(c));
+        }
+        (last, pending)
+    }
+
+    #[test]
+    fn plain_motion_resolves_with_default_count() {
+        let (resolved, _) = resolve_normal("j");
+        assert_eq!(resolved, Resolved::Act(EditorAction::MoveDown, 1));
+    }
+
+    #[test]
+    fn count_prefix_multiplies_and_consumes() {
+        let (resolved, _) = resolve_normal("12j");
+        assert_eq!(resolved, Resolved::Act(EditorAction::MoveDown, 12));
+    }
+
+    #[test]
+    fn zero_is_a_motion_without_a_count() {
+        let (resolved, _) = resolve_normal("0");
+        assert_eq!(resolved, Resolved::Act(EditorAction::LineStart, 1));
+        // With a count started, `0` is a digit: `10$` = count 10, line end.
+        let (resolved, _) = resolve_normal("10$");
+        assert_eq!(resolved, Resolved::Act(EditorAction::LineEnd, 10));
+    }
+
+    #[test]
+    fn operators_arm_then_resolve() {
+        let (resolved, _) = resolve_normal("dd");
+        assert_eq!(resolved, Resolved::Act(EditorAction::DeleteLine, 1));
+
+        let (resolved, _) = resolve_normal("dw");
+        assert_eq!(
+            resolved,
+            Resolved::Act(EditorAction::DeleteMotion(Motion::WordForward), 1)
+        );
+
+        // Counts compose either way: 2dw == d2w.
+        let (a, _) = resolve_normal("2dw");
+        let (b, _) = resolve_normal("d2w");
+        assert_eq!(
+            a,
+            Resolved::Act(EditorAction::DeleteMotion(Motion::WordForward), 2)
+        );
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn non_motion_cancels_the_operator() {
+        let (resolved, pending) = resolve_normal("dz");
+        assert_eq!(resolved, Resolved::Swallowed);
+        assert_eq!(pending.key, None, "cancelled operator is forgotten");
+    }
+
+    #[test]
+    fn gg_jumps_with_count() {
+        let (resolved, _) = resolve_normal("gg");
+        assert_eq!(resolved, Resolved::Act(EditorAction::MoveFirstLine, 1));
+        let (resolved, _) = resolve_normal("5gg");
+        assert_eq!(resolved, Resolved::Act(EditorAction::MoveFirstLine, 5));
+    }
+
+    #[test]
+    fn visual_binds_operator_keys_directly() {
+        let mut pending = PendingState::default();
+        assert_eq!(
+            resolve(&mut pending, Mode::Visual, key('d')),
+            Resolved::Act(EditorAction::DeleteSelection, 1)
+        );
+        assert_eq!(pending.key, None, "visual d never arms");
+        assert_eq!(
+            resolve(&mut pending, Mode::VisualLine, key('v')),
+            Resolved::Act(EditorAction::VisualCharOrExit, 1)
+        );
+    }
+
+    #[test]
+    fn unbound_key_is_ignored_and_drops_the_count() {
+        let (resolved, pending) = resolve_normal("5 ");
+        assert_eq!(resolved, Resolved::Ignored);
+        assert_eq!(pending.count, None);
+    }
+
+    #[test]
+    fn insert_inserts_plain_chars() {
+        let mut pending = PendingState::default();
+        assert_eq!(
+            resolve(&mut pending, Mode::Insert, key('x')),
+            Resolved::Act(EditorAction::Insert('x'), 1)
+        );
+    }
+
+    // ---- interpret (against a minimal EditorCtx) ----
+
+    struct MockCtx {
+        editor: Editor,
+        notes: Vec<String>,
+    }
+
+    impl EditorCtx for MockCtx {
+        fn editor(&mut self) -> &mut Editor {
+            &mut self.editor
+        }
+        fn notify(&mut self, message: &str) {
+            self.notes.push(message.to_owned());
+        }
+    }
+
+    #[test]
+    fn interpret_undo_at_oldest_notifies() {
+        let mut ctx = MockCtx {
+            editor: Editor::scratch().unwrap(),
+            notes: Vec::new(),
+        };
+        interpret(EditorAction::Undo, 1, &mut ctx);
+        assert_eq!(ctx.notes, ["already at oldest change"]);
+    }
+
+    #[test]
+    fn interpret_open_below_enters_insert() {
+        let mut ctx = MockCtx {
+            editor: Editor::scratch().unwrap(),
+            notes: Vec::new(),
+        };
+        interpret(EditorAction::OpenBelow, 1, &mut ctx);
+        assert_eq!(ctx.editor.mode(), Mode::Insert);
+    }
+}
