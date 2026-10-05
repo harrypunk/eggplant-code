@@ -10,7 +10,7 @@ use ratatui::layout::Rect;
 
 use crate::app::{App, Operator};
 use crate::commands::KeyStroke;
-use crate::components::editor::{self, EditorProps};
+use crate::components::editor::{self, EditorLine, EditorProps};
 use crate::components::welcome::{self, WelcomeProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
@@ -130,6 +130,11 @@ fn open_above(app: &mut App, _: usize) -> KeyResult {
     consumed()
 }
 
+fn enter_visual(app: &mut App, _: usize) -> KeyResult {
+    app.editor.enter_visual();
+    consumed()
+}
+
 fn enter_normal(app: &mut App, _: usize) -> KeyResult {
     app.editor.enter_normal();
     consumed()
@@ -176,9 +181,32 @@ static NORMAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
     (KeyStroke::char('u'), undo),
     (KeyStroke::ctrl('r'), redo),
     (KeyStroke::char('i'), enter_insert),
+    (KeyStroke::char('v'), enter_visual),
     (KeyStroke::char('a'), enter_append),
     (KeyStroke::char('o'), open_below),
     (KeyStroke::char('O'), open_above),
+];
+
+/// Visual-mode bindings: motions only — they extend the selection.
+/// `d`/`x`/`y`/`v`/`Esc` are handled directly in `handle_visual_key`.
+static VISUAL_KEYMAP: &[(KeyStroke, EditorCommand)] = &[
+    (KeyStroke::char('h'), move_left),
+    (KeyStroke::new(KeyCode::Left, KeyModifiers::NONE), move_left),
+    (KeyStroke::char('j'), move_down),
+    (KeyStroke::new(KeyCode::Down, KeyModifiers::NONE), move_down),
+    (KeyStroke::char('k'), move_up),
+    (KeyStroke::new(KeyCode::Up, KeyModifiers::NONE), move_up),
+    (KeyStroke::char('l'), move_right),
+    (
+        KeyStroke::new(KeyCode::Right, KeyModifiers::NONE),
+        move_right,
+    ),
+    (KeyStroke::char('w'), word_forward),
+    (KeyStroke::char('e'), word_end),
+    (KeyStroke::char('b'), word_backward),
+    (KeyStroke::char('0'), line_start),
+    (KeyStroke::char('$'), line_end),
+    (KeyStroke::char('G'), goto_line),
 ];
 
 /// Insert-mode bindings; unbound plain chars insert themselves.
@@ -313,6 +341,36 @@ impl EditorSurface {
         result
     }
 
+    /// Visual mode: motions extend the selection (the facade's `set_cursor`
+    /// preserves the fixed end), `d`/`x`/`y` act on it, `v`/`Esc` exits.
+    fn handle_visual_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+        if let Some(digit @ ('1'..='9' | '0')) = plain_char(&key) {
+            let d = digit.to_digit(10).unwrap() as usize;
+            if d > 0 || app.pending_count.is_some() {
+                app.pending_count = Some(app.pending_count.unwrap_or(0) * 10 + d);
+                return KeyResult::Consumed;
+            }
+        }
+        let count = app.pending_count.take().unwrap_or(1);
+        match plain_char(&key) {
+            _ if key.code == KeyCode::Esc => app.editor.enter_normal(),
+            Some('v') => app.editor.enter_normal(),
+            Some('d') | Some('x') => app.editor.delete_selection(),
+            Some('y') => app.editor.yank_selection(),
+            _ => {
+                let result = match lookup(VISUAL_KEYMAP, &key) {
+                    Some(command) => command(app, count),
+                    None => KeyResult::Ignored,
+                };
+                if matches!(result, KeyResult::Ignored) {
+                    app.pending_count = None;
+                }
+                return result;
+            }
+        }
+        KeyResult::Consumed
+    }
+
     fn handle_insert_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
         match lookup(INSERT_KEYMAP, &key) {
             Some(command) => command(app, 1),
@@ -335,7 +393,10 @@ impl Layer for EditorSurface {
         editor::view(
             &EditorProps {
                 lines: (self.scroll..self.scroll + area.height as usize)
-                    .map(|line| app.editor.highlighted_line(line))
+                    .map(|line| EditorLine {
+                        spans: app.editor.highlighted_line(line),
+                        selection: app.editor.visual_selection_on_line(line),
+                    })
                     .collect(),
                 scroll: self.scroll,
                 line_count: app.editor.line_count(),
@@ -355,6 +416,7 @@ impl Layer for EditorSurface {
         let result = match app.editor.mode() {
             Mode::Normal => self.handle_normal_key(key, app),
             Mode::Insert => self.handle_insert_key(key, app),
+            Mode::Visual => self.handle_visual_key(key, app),
         };
         self.ensure_cursor_visible(app);
         result

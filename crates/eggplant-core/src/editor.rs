@@ -418,17 +418,14 @@ impl Editor {
             .cursor(self.doc().text().slice(..))
     }
 
-    /// Raw head of the primary range — the insert position in insert mode.
-    fn selection_head(&self) -> usize {
-        self.doc().selection(self.view.id).primary().head
-    }
-
     /// Put the cursor at `pos`, respecting helix's block-cursor selection
     /// model: selections are always >= 1 grapheme wide and the range
     /// *direction* encodes the mode —
     ///
     /// - normal: forward `(pos, pos+1)`, block cursor sits at `pos`
     /// - insert: backward `(pos+1, pos)`, insert bar sits at `pos`
+    /// - visual: the fixed end is preserved, the head follows `pos`
+    ///   (flipping to a backward range when extending left past the anchor)
     fn set_cursor(&mut self, pos: usize) {
         let view_id = self.view.id;
         let len = self.doc().text().len_chars();
@@ -436,6 +433,22 @@ impl Editor {
         let range = match self.mode {
             Mode::Normal => Range::new(pos, (pos + 1).min(len)),
             Mode::Insert => Range::new((pos + 1).min(len), pos),
+            Mode::Visual => {
+                // The fixed end as an absolute char boundary: stored in
+                // `anchor`, which is the start when forward but one past the
+                // start when backward.
+                let primary = self.doc().selection(view_id).primary();
+                let fixed = if primary.head >= primary.anchor {
+                    primary.anchor
+                } else {
+                    primary.anchor - 1
+                };
+                if pos >= fixed {
+                    Range::new(fixed, (pos + 1).min(len))
+                } else {
+                    Range::new(fixed + 1, pos)
+                }
+            }
         };
         self.doc_mut()
             .expect("current buffer")
@@ -482,20 +495,88 @@ impl Editor {
         if self.mode == Mode::Normal {
             return;
         }
-        let head = self.selection_head();
-        let line = self.doc().text().char_to_line(head);
+        // Insert mode backs off one char (the bar sits *between* chars);
+        // visual mode keeps the cursor on the moving end.
+        let was_insert = self.mode == Mode::Insert;
+        let pos = self.cursor_char_idx();
+        let line = self.doc().text().char_to_line(pos);
         let line_start = self.doc().text().line_to_char(line);
         let line_len = self.line_char_len(line);
-        let col = head - line_start;
+        let col = pos - line_start;
         let target = if line_len == 0 {
             line_start
         } else {
-            line_start + col.saturating_sub(1).min(line_len - 1)
+            line_start
+                + col
+                    .saturating_sub(usize::from(was_insert))
+                    .min(line_len - 1)
         };
         self.mode = Mode::Normal;
         self.set_cursor(target);
         // End of an insert session: commit it as one undo revision.
         self.commit_history();
+    }
+
+    /// Visual (charwise) mode: motions extend the selection, `d`/`y` act on
+    /// it directly. The cursor char is included (vim convention).
+    pub fn enter_visual(&mut self) {
+        if self.current.is_none() || self.mode == Mode::Visual {
+            return;
+        }
+        let pos = self.cursor_char_idx();
+        let len = self.doc().text().len_chars();
+        let view_id = self.view.id;
+        self.mode = Mode::Visual;
+        self.doc_mut()
+            .expect("current buffer")
+            .set_selection(view_id, Selection::single(pos, (pos + 1).min(len)));
+    }
+
+    /// The selected char range (visual mode). Covers exactly the selected
+    /// chars, including the one under the cursor.
+    fn visual_char_range(&self) -> std::ops::Range<usize> {
+        let primary = self.doc().selection(self.view.id).primary();
+        primary.anchor.min(primary.head)..primary.anchor.max(primary.head)
+    }
+
+    /// Visual `d`/`x`: delete the selection (also yanks), back to normal.
+    pub fn delete_selection(&mut self) {
+        if self.mode != Mode::Visual || self.current.is_none() {
+            return;
+        }
+        let range = self.visual_char_range();
+        self.mode = Mode::Normal; // before delete: cursor collapses normally
+        self.delete_range(range);
+    }
+
+    /// Visual `y`: yank the selection, back to normal (cursor at its start).
+    pub fn yank_selection(&mut self) {
+        if self.mode != Mode::Visual || self.current.is_none() {
+            return;
+        }
+        let range = self.visual_char_range();
+        self.mode = Mode::Normal;
+        self.yank_range(range.clone());
+        self.set_cursor(range.start);
+    }
+
+    /// Visual selection intersected with `line`, as char columns
+    /// `[start, end)`. `None` outside visual mode / off the selection.
+    pub fn visual_selection_on_line(&self, line: usize) -> Option<(usize, usize)> {
+        if self.mode != Mode::Visual || self.current.is_none() {
+            return None;
+        }
+        let text = self.doc().text();
+        if line >= text.len_lines() {
+            return None;
+        }
+        let selection = self.visual_char_range();
+        let line_start = text.line_to_char(line);
+        let line_end = line_start + self.line_char_len(line);
+        let start = selection.start.max(line_start);
+        let end = selection.end.min(line_end);
+        // Lazy: the subtractions are only valid inside the intersection.
+        (start < end).then(|| (start - line_start, end - line_start))
     }
 
     // ---- movements ----
@@ -551,7 +632,7 @@ impl Editor {
         let start = text.line_to_char(line);
         let len = self.line_char_len(line);
         let max_col = match self.mode {
-            Mode::Normal => len.saturating_sub(1),
+            Mode::Normal | Mode::Visual => len.saturating_sub(1),
             Mode::Insert => len,
         };
         self.set_cursor(start + col.min(max_col));
@@ -1397,6 +1478,91 @@ mod tests {
         assert_eq!(text_of(&ed), "two\n");
         assert!(ed.undo());
         assert_eq!(text_of(&ed), "one\ntwo\n");
+    }
+
+    // ---- visual mode ----
+
+    #[test]
+    fn visual_extend_right_then_delete() {
+        let mut ed = editor_with("hello world");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.enter_visual();
+        assert_eq!(ed.mode(), Mode::Visual);
+        ed.move_right(4); // select "hello"
+        assert_eq!(ed.visual_selection_on_line(0), Some((0, 5)));
+        ed.delete_selection();
+        assert_eq!(ed.mode(), Mode::Normal);
+        assert_eq!(text_of(&ed), " world\n");
+        assert_eq!(ed.register().unwrap().text, "hello");
+        assert!(ed.undo(), "one revision");
+        assert_eq!(text_of(&ed), "hello world\n");
+    }
+
+    #[test]
+    fn visual_extend_left_past_anchor() {
+        let mut ed = editor_with("hello");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.move_right(4); // cursor on 'o'
+        ed.enter_visual();
+        ed.move_left(2); // select "llo" (anchor char included)
+        assert_eq!(ed.visual_selection_on_line(0), Some((2, 5)));
+        assert_eq!(ed.cursor(), (0, 2), "cursor rides the moving end");
+        ed.yank_selection();
+        assert_eq!(ed.register().unwrap().text, "llo");
+        assert_eq!(ed.mode(), Mode::Normal);
+        assert_eq!(ed.cursor(), (0, 2), "cursor at selection start");
+    }
+
+    #[test]
+    fn visual_shrinks_back_to_anchor() {
+        let mut ed = editor_with("hello");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.enter_visual();
+        ed.move_right(2);
+        assert_eq!(ed.visual_selection_on_line(0), Some((0, 3)));
+        ed.move_left(2);
+        assert_eq!(ed.visual_selection_on_line(0), Some((0, 1)));
+    }
+
+    #[test]
+    fn visual_word_motion_extends() {
+        let mut ed = editor_with("foo bar baz");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.enter_visual();
+        ed.move_word_forward(1);
+        // vim convention: visual `w` includes the next word's first char.
+        assert_eq!(ed.visual_selection_on_line(0), Some((0, 5)));
+    }
+
+    #[test]
+    fn visual_multiline_selection_reports_per_line_cols() {
+        let mut ed = editor_with("ab\ncd\nef");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.move_right(1); // on 'b'
+        ed.enter_visual();
+        ed.move_down(1); // onto line 1 col 1
+        assert_eq!(ed.visual_selection_on_line(0), Some((1, 2)));
+        assert_eq!(ed.visual_selection_on_line(1), Some((0, 2)));
+        assert_eq!(ed.visual_selection_on_line(2), None);
+    }
+
+    #[test]
+    fn esc_exits_visual_keeping_cursor() {
+        let mut ed = editor_with("hello");
+        ed.move_to_line(0);
+        ed.move_line_start();
+        ed.move_right(2);
+        ed.enter_visual();
+        ed.move_right(1);
+        ed.enter_normal();
+        assert_eq!(ed.mode(), Mode::Normal);
+        assert_eq!(ed.cursor(), (0, 3));
+        assert_eq!(ed.visual_selection_on_line(0), None);
     }
 
     #[test]

@@ -5,6 +5,7 @@ pub enum Mode {
     #[default]
     Normal,
     Insert,
+    Visual,
 }
 
 impl Mode {
@@ -12,6 +13,7 @@ impl Mode {
         match self {
             Mode::Normal => "NORMAL",
             Mode::Insert => "INSERT",
+            Mode::Visual => "VISUAL",
         }
     }
 }

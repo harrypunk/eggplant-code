@@ -26,6 +26,7 @@ pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
     let mode_bg = match props.mode {
         Mode::Normal => theme.mode_normal,
         Mode::Insert => theme.mode_insert,
+        Mode::Visual => theme.accent_alt,
     };
     let modified = if props.modified { " [+]" } else { "" };
     let name = props.buffer_name.clone().unwrap_or_default();
