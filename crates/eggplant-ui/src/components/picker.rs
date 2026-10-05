@@ -1,4 +1,5 @@
-//! The command palette: input row + filtered command list, hugging the top.
+//! The generic picker: input row + filtered item list, hugging the top.
+//! Commands palette, buffer grep, … are all pickers over different items.
 
 use ratatui::layout::{Constraint, Direction, Rect};
 use ratatui::style::{Modifier, Style};
@@ -7,23 +8,27 @@ use ratatui::text::{Line, Span};
 use crate::element::Element;
 use crate::theme::Theme;
 
-/// One command, projected for display (pre-filtered by the container).
-pub struct PaletteItem {
-    pub id: &'static str,
-    pub description: &'static str,
+/// One item, projected for display (pre-filtered by the container).
+pub struct PickerItem {
+    /// Leading, fixed-width column (command id, line number, …).
+    pub primary: String,
+    /// Free-form text after it (description, line text, …).
+    pub secondary: String,
 }
 
-/// Everything the palette needs — nothing more.
-pub struct PaletteProps {
+/// Everything the picker needs — nothing more.
+pub struct PickerProps {
+    /// Frame title ("palette", "grep", …).
+    pub title: &'static str,
     pub input: String,
-    pub items: Vec<PaletteItem>,
+    pub items: Vec<PickerItem>,
     pub selected: usize,
 }
 
 /// Display cap; the container pre-filters, this caps the rendered rows.
 pub const MAX_ROWS: u16 = 8;
 
-pub fn view(props: &PaletteProps, area: Rect, theme: &Theme) -> Element {
+pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
     // Centered horizontally, hugging the top of the body area.
     let width = (area.width * 3 / 5).max(30).min(area.width);
     let height = (MAX_ROWS + 3).min(area.height); // input + rows + borders
@@ -63,8 +68,8 @@ pub fn view(props: &PaletteProps, area: Rect, theme: &Theme) -> Element {
                 )
             };
             Line::from(vec![
-                Span::styled(format!(" {:<20}", item.id), id_style),
-                Span::styled(item.description, desc_style),
+                Span::styled(format!(" {:<20}", item.primary), id_style),
+                Span::styled(item.secondary.clone(), desc_style),
             ])
         })
         .collect();
@@ -73,7 +78,7 @@ pub fn view(props: &PaletteProps, area: Rect, theme: &Theme) -> Element {
         frame_area,
         Element::cleared(Element::Stack(vec![
             Element::Bordered {
-                title: Some(Line::from(" palette ")),
+                title: Some(Line::from(format!(" {} ", props.title))),
                 border_style: Style::default().fg(theme.accent),
                 style: Style::default().fg(theme.fg).bg(theme.surface),
                 child: Box::new(Element::Layout {
@@ -97,11 +102,12 @@ mod tests {
     fn selected_row_is_contrast_safe() {
         // Regression: selected description used to be Gray on DarkGray.
         let theme = Theme::default();
-        let props = PaletteProps {
+        let props = PickerProps {
+            title: "palette",
             input: String::new(),
-            items: vec![PaletteItem {
-                id: "app.quit",
-                description: "Quit",
+            items: vec![PickerItem {
+                primary: "app.quit".to_owned(),
+                secondary: "Quit".to_owned(),
             }],
             selected: 0,
         };

@@ -7,7 +7,7 @@
 pub mod dialog;
 pub mod editor;
 pub mod files_panel;
-pub mod palette;
+pub mod picker;
 pub mod prompt;
 pub mod statusline;
 pub mod toasts;

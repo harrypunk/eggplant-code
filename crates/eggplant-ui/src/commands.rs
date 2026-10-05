@@ -11,9 +11,9 @@ use crate::compositor::{Compositor, FocusDirection};
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::notification::Notification;
-use crate::layers::palette::Palette;
 use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
+use crate::layers::{grep, palette};
 use crate::theme::Theme;
 
 /// A key + modifier combination that can trigger a command.
@@ -175,11 +175,18 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
     KeyNode::Group {
         key: 's',
         description: "+search",
-        children: &[KeyNode::Leaf {
-            key: 'b',
-            description: "in buffer",
-            command: "search.buffer",
-        }],
+        children: &[
+            KeyNode::Leaf {
+                key: 'b',
+                description: "in buffer",
+                command: "search.buffer",
+            },
+            KeyNode::Leaf {
+                key: 'c',
+                description: "grep lines",
+                command: "search.lines",
+            },
+        ],
     },
     KeyNode::Leaf {
         key: 'q',
@@ -265,13 +272,22 @@ pub fn default_registry() -> Registry {
             id: "palette.open",
             description: "Open the command palette",
             execute: |app, compositor| {
-                compositor.push(Box::new(Palette::new(app.registry.commands().to_vec())));
+                compositor.push(Box::new(palette::command_palette(
+                    app.registry.commands().to_vec(),
+                )));
             },
         },
         Command {
             id: "search.buffer",
             description: "Search in buffer (live, n/N cycle)",
             execute: |_app, compositor| compositor.push(Box::new(SearchPrompt::new())),
+        },
+        Command {
+            id: "search.lines",
+            description: "Grep lines in buffer (live)",
+            execute: |app, compositor| {
+                compositor.push(Box::new(grep::buffer_grep(app.editor.buffer_lines())));
+            },
         },
         Command {
             id: "which-key.open",

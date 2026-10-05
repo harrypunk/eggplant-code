@@ -918,6 +918,14 @@ impl Editor {
                 .is_some_and(|s| Some(s.buffer) == self.current_slot())
     }
 
+    /// All buffer lines as plain text (picker source for buffer grep).
+    /// Empty when bufferless.
+    pub fn buffer_lines(&self) -> Vec<String> {
+        self.doc_opt()
+            .map(|doc| doc.text().lines().map(|line| line.to_string()).collect())
+            .unwrap_or_default()
+    }
+
     /// Search matches intersecting `line` as char columns
     /// `(start, end, is_current)`. Empty outside an active search.
     pub fn search_marks_on_line(&self, line: usize) -> Vec<(usize, usize, bool)> {
