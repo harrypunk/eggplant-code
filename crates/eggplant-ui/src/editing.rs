@@ -448,6 +448,44 @@ static OPERATOR_MOTIONS: &[(KeyStroke, Motion)] = &[
     (KeyStroke::new(KeyCode::Right, NONE), Motion::Right),
 ];
 
+/// The modal keymaps as runtime data: compiled defaults, overridable from
+/// the config file (user entries are *prepended*, so they shadow defaults).
+#[derive(Clone)]
+pub struct Keymaps {
+    pub normal: Vec<(KeyStroke, EditorAction)>,
+    pub visual: Vec<(KeyStroke, EditorAction)>,
+    pub insert: Vec<(KeyStroke, EditorAction)>,
+    /// Motions an operator consumes (`dw`…).
+    pub operator_motions: Vec<(KeyStroke, Motion)>,
+}
+
+impl Default for Keymaps {
+    fn default() -> Self {
+        Self {
+            normal: NORMAL_KEYMAP.to_vec(),
+            visual: VISUAL_KEYMAP.to_vec(),
+            insert: INSERT_KEYMAP.to_vec(),
+            operator_motions: OPERATOR_MOTIONS.to_vec(),
+        }
+    }
+}
+
+impl Keymaps {
+    /// Shadow-or-add bindings (`Vec::splice`: user entries first).
+    pub fn override_keys(&mut self, mode: Mode, entries: Vec<(KeyStroke, EditorAction)>) {
+        let table = match mode {
+            Mode::Normal => &mut self.normal,
+            Mode::Insert => &mut self.insert,
+            Mode::Visual | Mode::VisualLine => &mut self.visual,
+        };
+        table.splice(..0, entries);
+    }
+
+    pub fn override_operator_motions(&mut self, entries: Vec<(KeyStroke, Motion)>) {
+        self.operator_motions.splice(..0, entries);
+    }
+}
+
 fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
     keymap
         .iter()
@@ -467,16 +505,21 @@ fn plain_char(key: &KeyEvent) -> Option<char> {
 
 /// The modal input state machine: fold a keypress (plus pending state) into
 /// a resolution. Counts and armed operators live here and nowhere else.
-pub fn resolve(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resolved {
+pub fn resolve(
+    pending: &mut PendingState,
+    mode: Mode,
+    key: KeyEvent,
+    keymaps: &Keymaps,
+) -> Resolved {
     match mode {
-        Mode::Insert => resolve_insert(key),
-        Mode::Normal => resolve_modal(pending, Mode::Normal, key),
-        Mode::Visual | Mode::VisualLine => resolve_modal(pending, Mode::Visual, key),
+        Mode::Insert => resolve_insert(keymaps, key),
+        Mode::Normal => resolve_modal(pending, Mode::Normal, key, keymaps),
+        Mode::Visual | Mode::VisualLine => resolve_modal(pending, Mode::Visual, key, keymaps),
     }
 }
 
-fn resolve_insert(key: KeyEvent) -> Resolved {
-    match lookup(INSERT_KEYMAP, &key) {
+fn resolve_insert(keymaps: &Keymaps, key: KeyEvent) -> Resolved {
+    match lookup(&keymaps.insert, &key) {
         Some(action) => Resolved::Act(action, 1),
         None => match plain_char(&key) {
             Some(c) => Resolved::Insert(c),
@@ -487,7 +530,12 @@ fn resolve_insert(key: KeyEvent) -> Resolved {
 
 /// Normal and visual share the machinery; `Mode` picks the keymap and
 /// whether `d`/`y` arm operators (visual binds them directly).
-fn resolve_modal(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resolved {
+fn resolve_modal(
+    pending: &mut PendingState,
+    mode: Mode,
+    key: KeyEvent,
+    keymaps: &Keymaps,
+) -> Resolved {
     // Count prefix: digits accumulate (`0` is a motion when no count yet).
     if let Some(digit @ ('1'..='9' | '0')) = plain_char(&key) {
         let d = digit.to_digit(10).unwrap() as usize;
@@ -510,7 +558,7 @@ fn resolve_modal(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resol
                 if matches!(pending_key, PendingKey::Goto) {
                     return Resolved::Swallowed;
                 }
-                match lookup(OPERATOR_MOTIONS, &key) {
+                match lookup(&keymaps.operator_motions, &key) {
                     Some(motion) => match pending_key {
                         PendingKey::Delete => Resolved::DeleteMotion(motion, total),
                         PendingKey::Yank => Resolved::YankMotion(motion, total),
@@ -534,8 +582,8 @@ fn resolve_modal(pending: &mut PendingState, mode: Mode, key: KeyEvent) -> Resol
     }
 
     let keymap = match mode {
-        Mode::Normal => NORMAL_KEYMAP,
-        _ => VISUAL_KEYMAP,
+        Mode::Normal => &keymaps.normal,
+        _ => &keymaps.visual,
     };
     match lookup(keymap, &key) {
         Some(action) => Resolved::Act(action, count),
@@ -561,10 +609,11 @@ mod tests {
     }
 
     fn resolve_normal(keys: &str) -> (Resolved, PendingState) {
+        let keymaps = Keymaps::default();
         let mut pending = PendingState::default();
         let mut last = Resolved::Ignored;
         for c in keys.chars() {
-            last = resolve(&mut pending, Mode::Normal, key(c));
+            last = resolve(&mut pending, Mode::Normal, key(c), &keymaps);
         }
         (last, pending)
     }
@@ -622,14 +671,15 @@ mod tests {
 
     #[test]
     fn visual_binds_operator_keys_directly() {
+        let keymaps = Keymaps::default();
         let mut pending = PendingState::default();
         assert_eq!(
-            resolve(&mut pending, Mode::Visual, key('d')),
+            resolve(&mut pending, Mode::Visual, key('d'), &keymaps),
             Resolved::Act(EditorAction::DeleteSelection, 1)
         );
         assert_eq!(pending.key, None, "visual d never arms");
         assert_eq!(
-            resolve(&mut pending, Mode::VisualLine, key('v')),
+            resolve(&mut pending, Mode::VisualLine, key('v'), &keymaps),
             Resolved::Act(EditorAction::VisualCharOrExit, 1)
         );
     }
@@ -643,9 +693,10 @@ mod tests {
 
     #[test]
     fn insert_inserts_plain_chars() {
+        let keymaps = Keymaps::default();
         let mut pending = PendingState::default();
         assert_eq!(
-            resolve(&mut pending, Mode::Insert, key('x')),
+            resolve(&mut pending, Mode::Insert, key('x'), &keymaps),
             Resolved::Insert('x')
         );
     }

@@ -3,7 +3,7 @@
 use eggplant_core::Editor;
 
 use crate::commands::{self, Registry};
-use crate::editing::{EditorCtx, PendingState};
+use crate::editing::{EditorCtx, Keymaps, PendingState};
 use crate::layers::notification::{Notification, Notifications};
 use crate::theme::Theme;
 
@@ -45,6 +45,8 @@ pub struct App {
     /// Pending modal input (counts, armed operators) — the statusline's
     /// showcmd-style hint reads it; `editing::resolve` mutates it.
     pub pending: PendingState,
+    /// Modal keymaps (compiled defaults + config overrides).
+    pub keymaps: Keymaps,
     /// Leap-jump in progress (Space g c).
     pub leap: Option<Leap>,
     lifecycle: Lifecycle,
@@ -61,6 +63,7 @@ impl App {
             theme: Theme::default(),
             lifecycle: Lifecycle::Running,
             pending: PendingState::default(),
+            keymaps: Keymaps::default(),
             leap: None,
             tick_count: 0,
         }

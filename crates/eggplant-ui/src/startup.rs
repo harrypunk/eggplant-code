@@ -8,6 +8,7 @@ use eggplant_core::Editor;
 
 use crate::app::App;
 use crate::compositor::Compositor;
+use crate::config::Config;
 use crate::layers::editor::EditorSurface;
 use crate::layers::files_panel::FilesPanel;
 use crate::layers::notification::Notification;
@@ -43,6 +44,13 @@ pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
     .map_err(io::Error::other)?;
 
     let mut app = App::new(editor);
+    match Config::load() {
+        Ok(Some(config)) => config.apply(&mut app),
+        Ok(None) => {}
+        Err(err) => app
+            .notifications
+            .push(Notification::error(format!("config: {err}"))),
+    }
     let mut compositor = Compositor::new();
 
     // Base layer: the editor surface. Later layers stack on top.

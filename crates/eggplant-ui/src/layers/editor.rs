@@ -90,7 +90,8 @@ impl Layer for EditorSurface {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        let result = match editing::resolve(&mut app.pending, app.editor.mode(), key) {
+        let result = match editing::resolve(&mut app.pending, app.editor.mode(), key, &app.keymaps)
+        {
             Resolved::Swallowed => KeyResult::Consumed,
             Resolved::Ignored => KeyResult::Ignored,
             resolved => {

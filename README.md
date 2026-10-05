@@ -101,11 +101,38 @@ which-key menu can never disagree); the root holds only the few cross-group
 singletons (`p` palette, `t` theme, `q` quit). Keybindings will become
 user-configurable (`keys.toml`) once the config loader lands (M8).
 
+## Configuration
+
+One file, ghostty-style: `$XDG_CONFIG_HOME/eggplant/config.toml`
+(`~/.config/eggplant/config.toml`). Everything is optional; bad entries
+warn in-app and fall back to defaults.
+
+```toml
+theme = "classic"          # built-in theme name
+
+[keys.global]              # any mode; value = command id (palette names)
+"C-x" = "app.quit"
+
+[keys.normal]              # modal tables; value = edit.* action id
+";" = "edit.enter-insert"
+
+[keys.visual]
+# ...
+
+[keys.insert]
+# ...
+```
+
+Stroke syntax: `"C-S-p"`, `"Space"`, `"Esc"`, `"left"`, `"F2"`, or a single
+char (case matters: `"G"` ≠ `"g"`). User bindings shadow defaults for the
+same stroke. Command ids: palette entries (e.g. `file.save`) or `edit.*`
+actions; the which-key tree itself stays code-defined for now.
+
 ## Themes
 
 Semantic theme slots; built-ins `tokyo-night` (default) and `classic`.
-Cycle at runtime with `Space t`. Custom theme files (ghostty-style) are on
-the roadmap (M8).
+Cycle at runtime with `Space t`, or set `theme` in the config. Custom theme
+files (ghostty-style) are on the roadmap (M8).
 
 ## Language support (syntax highlighting)
 

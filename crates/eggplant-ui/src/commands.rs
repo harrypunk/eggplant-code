@@ -50,6 +50,49 @@ impl KeyStroke {
         Self::new(KeyCode::F(n), KeyModifiers::NONE)
     }
 
+    /// Parse a config-file stroke: `"C-S-p"`, `"Space"`, `"g"`, `"F2"`,
+    /// `"left"`. Modifiers are `-`-prefixed (`C-`/`A-`/`S-`), key names are
+    /// case-insensitive, a single char keeps its case (`G` ≠ `g`).
+    pub fn parse(text: &str) -> Option<Self> {
+        let (mods, key) = match text.rsplit_once('-') {
+            Some((mods, key)) if !key.is_empty() => (mods, key),
+            _ => ("", text),
+        };
+        let mut modifiers = KeyModifiers::NONE;
+        for m in mods.split('-').filter(|m| !m.is_empty()) {
+            modifiers |= match m.to_ascii_lowercase().as_str() {
+                "c" | "ctrl" => KeyModifiers::CONTROL,
+                "a" | "alt" => KeyModifiers::ALT,
+                "s" | "shift" => KeyModifiers::SHIFT,
+                _ => return None,
+            };
+        }
+        let code = match key.to_ascii_lowercase().as_str() {
+            "space" => KeyCode::Char(' '),
+            "esc" => KeyCode::Esc,
+            "enter" => KeyCode::Enter,
+            "tab" => KeyCode::Tab,
+            "backspace" => KeyCode::Backspace,
+            "delete" => KeyCode::Delete,
+            "left" => KeyCode::Left,
+            "right" => KeyCode::Right,
+            "up" => KeyCode::Up,
+            "down" => KeyCode::Down,
+            f if f.len() >= 2
+                && f.len() <= 3
+                && f.starts_with('f')
+                && f[1..].chars().all(|c| c.is_ascii_digit()) =>
+            {
+                KeyCode::F(f[1..].parse().ok()?)
+            }
+            _ if key.chars().count() == 1 => {
+                KeyCode::Char(key.chars().next().expect("len checked"))
+            }
+            _ => return None,
+        };
+        Some(Self::new(code, modifiers))
+    }
+
     pub fn matches(&self, key: &KeyEvent) -> bool {
         if self.code != key.code {
             return false;
@@ -116,12 +159,24 @@ impl Command {
 #[derive(Default)]
 pub struct Registry {
     commands: Vec<Command>,
-    keymap: Vec<(KeyStroke, &'static str)>,
+    keymap: Vec<(KeyStroke, String)>,
 }
 
 impl Registry {
     pub fn new(commands: Vec<Command>, keymap: Vec<(KeyStroke, &'static str)>) -> Self {
-        Self { commands, keymap }
+        Self {
+            commands,
+            keymap: keymap
+                .into_iter()
+                .map(|(stroke, id)| (stroke, id.to_owned()))
+                .collect(),
+        }
+    }
+
+    /// Bind (or shadow) a stroke → command id. Config overrides prepend, so
+    /// they win over defaults.
+    pub fn bind(&mut self, stroke: KeyStroke, id: &str) {
+        self.keymap.insert(0, (stroke, id.to_owned()));
     }
 
     /// The command bound to `key` in the global keymap, if any.
