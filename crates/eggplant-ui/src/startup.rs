@@ -44,6 +44,15 @@ pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
     .map_err(io::Error::other)?;
 
     let mut app = App::new(editor);
+
+    // Directory startup: the directory is the workspace root (explorer and
+    // file picker scope). Set before config so `[files] ignore` applies
+    // onto it.
+    if let StartupTarget::Directory(dir) = target {
+        app.root = dir.clone();
+        app.file_ignores = crate::files::IgnoreRules::new(&app.root, &[]);
+    }
+
     match Config::load() {
         Ok(Some(config)) => config.apply(&mut app),
         Ok(None) => {}
@@ -56,7 +65,6 @@ pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
     // Base layer: the editor surface. Later layers stack on top.
     compositor.push(Box::new(EditorSurface::new()));
 
-    // Directory startup: dock the file explorer (netrw-style), focused.
     if let StartupTarget::Directory(dir) = target {
         match FilesPanel::new(dir.clone()) {
             Ok(panel) => {

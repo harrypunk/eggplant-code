@@ -11,6 +11,7 @@ use crate::app::Leap;
 use crate::compositor::{Compositor, FocusDirection};
 use crate::editing::EditorAction;
 use crate::layers::dialog::{ConfirmDialog, Dialog};
+use crate::layers::file_picker;
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::leap::LeapLayer;
 use crate::layers::notification::Notification;
@@ -253,6 +254,11 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
                 description: "explorer",
                 command: "panel.files.toggle",
             },
+            KeyNode::Leaf {
+                key: 'p',
+                description: "picker",
+                command: "file.open-picker",
+            },
         ],
     },
     KeyNode::Group {
@@ -331,6 +337,13 @@ pub fn default_registry() -> Registry {
             "file.save",
             "Save the current buffer",
             save_with_notification,
+        ),
+        Command::app(
+            "file.open-picker",
+            "Open a file (picker)",
+            |app, compositor| {
+                compositor.push(Box::new(file_picker::file_picker(app)));
+            },
         ),
         Command::app(
             "panel.files.toggle",

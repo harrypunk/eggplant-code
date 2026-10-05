@@ -4,6 +4,7 @@ use eggplant_core::Editor;
 
 use crate::commands::{self, Registry};
 use crate::editing::{EditorCtx, Keymaps, PendingState};
+use crate::files::IgnoreRules;
 use crate::layers::notification::{Notification, Notifications};
 use crate::theme::Theme;
 
@@ -47,6 +48,10 @@ pub struct App {
     pub pending: PendingState,
     /// Modal keymaps (compiled defaults + config overrides).
     pub keymaps: Keymaps,
+    /// Workspace root (file picker/explorer scope).
+    pub root: std::path::PathBuf,
+    /// File ignore rules (defaults + config `[files] ignore`).
+    pub file_ignores: IgnoreRules,
     /// Leap-jump in progress (Space g c).
     pub leap: Option<Leap>,
     lifecycle: Lifecycle,
@@ -64,6 +69,8 @@ impl App {
             lifecycle: Lifecycle::Running,
             pending: PendingState::default(),
             keymaps: Keymaps::default(),
+            root: std::env::current_dir().unwrap_or_default(),
+            file_ignores: IgnoreRules::new(&std::env::current_dir().unwrap_or_default(), &[]),
             leap: None,
             tick_count: 0,
         }

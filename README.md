@@ -74,7 +74,8 @@ Space
 ├── f +file
 │   ├── s save
 │   ├── q save & quit
-│   └── e explorer
+│   ├── e explorer
+│   └── p picker           — fuzzy over workspace files
 ├── b +buffer
 │   ├── n next
 │   ├── p prev
@@ -121,12 +122,20 @@ theme = "classic"          # built-in theme name
 
 [keys.insert]
 # ...
+
+[files]                    # file picker ignore list (gitignore syntax)
+ignore = ["dist/", "!target/"]   # add a pattern; ! re-includes a default
 ```
 
 Stroke syntax: `"C-S-p"`, `"Space"`, `"Esc"`, `"left"`, `"F2"`, or a single
 char (case matters: `"G"` ≠ `"g"`). User bindings shadow defaults for the
 same stroke. Command ids: palette entries (e.g. `file.save`) or `edit.*`
 actions; the which-key tree itself stays code-defined for now.
+
+The picker always respects `.gitignore` and skips hidden files. Built-in
+ignores cover dependency/build dirs (`target/`, `node_modules/`,
+`__pycache__/`, `.venv/`, `venv/`, `*.egg-info/`); `[files] ignore` extends
+them with gitignore semantics — add `dist/`, remove with `!target/`.
 
 ## Themes
 

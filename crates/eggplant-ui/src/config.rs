@@ -32,6 +32,16 @@ use crate::theme::Theme;
 pub struct Config {
     pub theme: Option<String>,
     pub keys: Keys,
+    pub files: Files,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Files {
+    /// Gitignore-syntax patterns, appended after the built-in defaults
+    /// (rust `target/`, `node_modules/`, python `__pycache__/`/`.venv/`…).
+    /// `!pattern` re-includes — removing a default is a negation away.
+    pub ignore: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -80,6 +90,9 @@ impl Config {
             }
         }
         self.keys.apply(app, &mut warnings);
+        if !self.files.ignore.is_empty() {
+            app.file_ignores = crate::files::IgnoreRules::new(&app.root, &self.files.ignore);
+        }
         for warning in warnings {
             app.notifications
                 .push(Notification::warn(format!("config: {warning}")));
