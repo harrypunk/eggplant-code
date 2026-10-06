@@ -91,7 +91,7 @@ impl Config {
         }
         self.keys.apply(app, &mut warnings);
         if !self.files.ignore.is_empty() {
-            app.file_ignores = crate::files::IgnoreRules::new(&app.root, &self.files.ignore);
+            app.workspace.set_ignore_patterns(&self.files.ignore);
         }
         for warning in warnings {
             app.notifications

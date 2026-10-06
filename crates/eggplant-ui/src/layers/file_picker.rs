@@ -2,7 +2,7 @@
 
 use crate::app::App;
 use crate::compositor::KeyResult;
-use crate::files::{self, FileEntry};
+use crate::files::FileEntry;
 use crate::layers::notification::Notification;
 
 use super::picker::{Picker, PickerSpec};
@@ -14,7 +14,7 @@ const FILE_CAP: usize = 20_000;
 pub fn file_picker(app: &App) -> Picker<FileEntry> {
     Picker::new(PickerSpec {
         title: "open",
-        items: files::collect_files(&app.root, &app.file_ignores, FILE_CAP),
+        items: app.workspace.collect_files(FILE_CAP),
         text_of: |file| &file.rel,
         project: |file| {
             let name = file

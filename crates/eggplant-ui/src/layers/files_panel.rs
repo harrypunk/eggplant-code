@@ -51,7 +51,7 @@ impl FilesPanel {
     }
 
     fn rows(&self, app: &App) -> Vec<TreeRow> {
-        self.tree.rows(&app.file_ignores, self.show_all)
+        self.tree.rows(&app.workspace.ignores, self.show_all)
     }
 
     fn selected_row(&self, app: &App) -> Option<TreeRow> {
@@ -343,7 +343,7 @@ mod tests {
         let names = |panel: &FilesPanel, app: &App| -> Vec<String> {
             panel.rows(app).iter().map(|r| r.name.clone()).collect()
         };
-        app.file_ignores = crate::files::IgnoreRules::new(&root, &[]);
+        app.workspace = crate::files::Workspace::new(root.clone());
 
         // filtered: no target/, no dotfiles
         assert_eq!(names(&panel, &app), ["a_dir", "z_dir", "b.txt"]);

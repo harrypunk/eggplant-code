@@ -52,6 +52,40 @@ impl IgnoreRules {
     }
 }
 
+/// The workspace: root directory + the ignore rules rooted at it. Root and
+/// rules change together (directory startup re-roots, config re-patterns),
+/// so they live in one type — `App` composes it instead of loose fields.
+pub struct Workspace {
+    pub root: PathBuf,
+    pub ignores: IgnoreRules,
+}
+
+impl Workspace {
+    /// Rooted at `root` with the built-in ignore defaults.
+    pub fn new(root: PathBuf) -> Self {
+        Self {
+            ignores: IgnoreRules::new(&root, &[]),
+            root,
+        }
+    }
+
+    /// Re-root (directory startup): rules re-root too.
+    pub fn set_root(&mut self, root: PathBuf) {
+        self.ignores = IgnoreRules::new(&root, &[]);
+        self.root = root;
+    }
+
+    /// Apply user patterns (config `[files] ignore`, gitignore syntax).
+    pub fn set_ignore_patterns(&mut self, extra: &[String]) {
+        self.ignores = IgnoreRules::new(&self.root.clone(), extra);
+    }
+
+    /// Files under the root (respecting .gitignore + ignore rules), capped.
+    pub fn collect_files(&self, cap: usize) -> Vec<FileEntry> {
+        collect_files(&self.root, &self.ignores, cap)
+    }
+}
+
 /// A discovered file: relative path for display/filtering, absolute for
 /// opening.
 pub struct FileEntry {

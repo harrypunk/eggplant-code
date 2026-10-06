@@ -49,8 +49,7 @@ pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
     // file picker scope). Set before config so `[files] ignore` applies
     // onto it.
     if let StartupTarget::Directory(dir) = target {
-        app.root = dir.clone();
-        app.file_ignores = crate::files::IgnoreRules::new(&app.root, &[]);
+        app.workspace.set_root(dir.clone());
     }
 
     match Config::load() {
