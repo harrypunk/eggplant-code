@@ -5,6 +5,11 @@
 //! `App`). Custom theme files (ghostty-style `~/.config/eggplant/themes`)
 //! are planned for M7; the registry is the seam.
 
+pub mod derive;
+pub mod spec;
+
+pub use spec::ThemeSpec;
+
 use ratatui::style::{Color, Style};
 
 use eggplant_core::SyntaxScope;
