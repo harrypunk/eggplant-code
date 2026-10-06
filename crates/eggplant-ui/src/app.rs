@@ -43,6 +43,8 @@ pub struct App {
     pub registry: Registry,
     /// Active color theme (components read it via props adapters).
     pub theme: Theme,
+    /// Which source the theme follows (fixed vs. live ghostty switch).
+    pub theme_follow: crate::theme::resolve::Follow,
     /// Pending modal input (counts, armed operators) — the statusline's
     /// showcmd-style hint reads it; `editing::resolve` mutates it.
     pub pending: PendingState,
@@ -55,7 +57,7 @@ pub struct App {
     /// Leap-jump in progress (Space g c).
     pub leap: Option<Leap>,
     lifecycle: Lifecycle,
-    /// Demo counter for the `F3` notification-spam key (until real producers exist).
+    /// Event-loop ticks (250ms each): drives the theme re-probe cadence.
     pub tick_count: u32,
 }
 
@@ -84,6 +86,7 @@ impl App {
             notifications: Notifications::new(),
             registry: commands::default_registry(),
             theme: Theme::default(),
+            theme_follow: crate::theme::resolve::Follow::Fixed,
             lifecycle: Lifecycle::Running,
             pending: PendingState::default(),
             keymaps: Keymaps::default(),

@@ -113,7 +113,9 @@ One file, ghostty-style: `$XDG_CONFIG_HOME/eggplant/config.toml`
 warn in-app and fall back to defaults.
 
 ```toml
-theme = "classic"          # built-in theme name
+theme = "classic"          # built-in theme name. Unset: inside ghostty we
+                           # follow its theme = light:X,dark:Y and switch with
+                           # the OS; elsewhere the built-in default is used
 
 [keys.global]              # any mode; value = command id (palette names)
 "C-x" = "app.quit"

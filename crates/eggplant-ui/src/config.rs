@@ -30,7 +30,6 @@ use crate::layers::leap::LeapAction;
 use crate::layers::notification::Notification;
 use crate::layers::picker::PickerAction;
 use crate::layers::search_prompt::PromptAction;
-use crate::theme::Theme;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -94,13 +93,9 @@ impl Config {
 
     /// Apply onto a freshly built app; problems become notifications.
     pub fn apply(self, app: &mut App) {
+        // Theme resolution is NOT here: it lives in theme::resolve
+        // (explicit name → ghostty → default), driven by startup::boot.
         let mut warnings = Vec::new();
-        if let Some(theme) = &self.theme {
-            match Theme::by_name(theme) {
-                Some(theme) => app.theme = theme,
-                None => warnings.push(format!("unknown theme '{theme}'")),
-            }
-        }
         self.keys.apply(app, &mut warnings);
         if !self.files.ignore.is_empty() {
             app.workspace.set_ignore_patterns(&self.files.ignore);
@@ -320,8 +315,8 @@ mod tests {
         .unwrap();
         let mut app = App::new(eggplant_core::Editor::scratch().unwrap());
         config.apply(&mut app);
-        // theme untouched, default keymap intact, two warnings raised
-        assert_eq!(app.theme.name, Theme::default().name);
+        // unknown theme names are handled by theme::resolve, not apply;
+        // the keymap falls back to defaults and a warning is raised
         assert_eq!(
             crate::editing::resolve(
                 &mut Default::default(),

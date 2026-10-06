@@ -5,6 +5,7 @@
 
 use std::io;
 
+use crossterm::event::{DisableFocusChange, EnableFocusChange};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -24,7 +25,9 @@ impl TerminalGuard {
     pub fn enter() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
+        // Focus events: re-probing the terminal theme on focus-in is how
+        // we notice the OS light/dark flipping (no push channel exists).
+        execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
         let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
         Ok(Self { terminal })
     }
@@ -38,7 +41,11 @@ impl Drop for TerminalGuard {
     fn drop(&mut self) {
         // Best-effort restore: we're unwinding, errors here are unactionable.
         let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+        let _ = execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableFocusChange
+        );
         let _ = self.terminal.show_cursor();
     }
 }

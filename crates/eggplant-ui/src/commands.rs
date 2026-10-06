@@ -521,9 +521,8 @@ fn toggle_demo_dialog(_: &mut App, compositor: &mut Compositor) {
 }
 
 fn demo_notification(app: &mut App, _: &mut Compositor) {
-    app.tick_count += 1;
     app.notifications.push(Notification::info(format!(
-        "notification #{}",
+        "notification (tick #{})",
         app.tick_count
     )));
 }

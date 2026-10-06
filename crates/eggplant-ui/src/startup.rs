@@ -53,11 +53,17 @@ pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
     }
 
     match Config::load() {
-        Ok(Some(config)) => config.apply(&mut app),
-        Ok(None) => {}
-        Err(err) => app
-            .notifications
-            .push(Notification::error(format!("config: {err}"))),
+        Ok(Some(config)) => {
+            let theme_name = config.theme.clone();
+            config.apply(&mut app);
+            resolve_theme(theme_name.as_deref(), &mut app);
+        }
+        Ok(None) => resolve_theme(None, &mut app),
+        Err(err) => {
+            app.notifications
+                .push(Notification::error(format!("config: {err}")));
+            resolve_theme(None, &mut app);
+        }
     }
     let mut compositor = Compositor::new();
 
@@ -81,6 +87,24 @@ pub fn boot(target: &StartupTarget) -> io::Result<(App, Compositor)> {
         .push(Notification::info("welcome to eggplant-code"));
 
     Ok((app, compositor))
+}
+
+/// Theme resolution (composition root): explicit config name → follow
+/// ghostty when inside it → built-in default. Warnings become
+/// notifications, never errors.
+fn resolve_theme(explicit: Option<&str>, app: &mut App) {
+    let mut probe = crate::theme::probe::TerminalProbe::new();
+    let resolution = crate::theme::resolve::initial(
+        explicit,
+        crate::theme::resolve::inside_ghostty(),
+        &mut probe,
+    );
+    app.theme = resolution.theme;
+    app.theme_follow = resolution.follow;
+    for warning in resolution.warnings {
+        app.notifications
+            .push(Notification::warn(format!("theme: {warning}")));
+    }
 }
 
 #[cfg(test)]

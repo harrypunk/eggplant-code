@@ -7,6 +7,8 @@
 
 pub mod derive;
 pub mod ghostty;
+pub mod probe;
+pub mod resolve;
 pub mod spec;
 
 pub use spec::ThemeSpec;
