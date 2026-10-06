@@ -48,6 +48,8 @@ pub struct App {
     pub pending: PendingState,
     /// Modal keymaps (compiled defaults + config overrides).
     pub keymaps: Keymaps,
+    /// Layer-local keymaps (explorer, picker, prompt, dialog, leap).
+    pub layer_keys: crate::keymaps::LayerKeymaps,
     /// The workspace: root + ignore rules (file picker/explorer scope).
     pub workspace: Workspace,
     /// Leap-jump in progress (Space g c).
@@ -85,6 +87,7 @@ impl App {
             lifecycle: Lifecycle::Running,
             pending: PendingState::default(),
             keymaps: Keymaps::default(),
+            layer_keys: crate::keymaps::LayerKeymaps::default(),
             workspace: Workspace::new(std::env::current_dir().unwrap_or_default()),
             leap: None,
             tick_count: 0,

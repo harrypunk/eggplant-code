@@ -512,7 +512,7 @@ impl Keymaps {
     }
 }
 
-fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
+pub(crate) fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
     keymap
         .iter()
         .find(|(stroke, _)| stroke.matches(key))

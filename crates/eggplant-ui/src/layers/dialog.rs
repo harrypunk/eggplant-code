@@ -1,9 +1,10 @@
 //! Floating dialog layers: a generic message dialog and a yes/no confirm dialog.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::App;
+use crate::commands::KeyStroke;
 use crate::components::dialog;
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
@@ -50,6 +51,37 @@ impl Layer for Dialog {
 type ConfirmAction = Box<dyn FnOnce(&mut App)>;
 
 /// Modal yes/no confirmation; runs `on_confirm` when accepted.
+/// The confirm dialog's closed action set (config: `[keys.dialog]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogAction {
+    Confirm,
+    Cancel,
+}
+
+impl DialogAction {
+    pub fn from_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "confirm" => Self::Confirm,
+            "cancel" => Self::Cancel,
+            _ => return None,
+        })
+    }
+}
+
+/// Default dialog bindings.
+pub const DEFAULT_KEYS: &[(KeyStroke, DialogAction)] = &[
+    (KeyStroke::char('y'), DialogAction::Confirm),
+    (
+        KeyStroke::new(KeyCode::Enter, KeyModifiers::NONE),
+        DialogAction::Confirm,
+    ),
+    (KeyStroke::char('n'), DialogAction::Cancel),
+    (
+        KeyStroke::new(KeyCode::Esc, KeyModifiers::NONE),
+        DialogAction::Cancel,
+    ),
+];
+
 pub struct ConfirmDialog {
     title: String,
     message: String,
@@ -76,15 +108,15 @@ impl Layer for ConfirmDialog {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Enter => {
+        match crate::editing::lookup(&app.layer_keys.dialog, &key) {
+            Some(DialogAction::Confirm) => {
                 if let Some(on_confirm) = self.on_confirm.take() {
                     on_confirm(app);
                 }
                 KeyResult::Close
             }
-            KeyCode::Char('n') | KeyCode::Esc => KeyResult::Close,
-            _ => KeyResult::Consumed, // modal
+            Some(DialogAction::Cancel) => KeyResult::Close,
+            None => KeyResult::Consumed, // modal
         }
     }
 

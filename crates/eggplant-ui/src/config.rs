@@ -24,7 +24,12 @@ use serde::Deserialize;
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::editing::EditorAction;
+use crate::layers::dialog::DialogAction;
+use crate::layers::files_panel::ExplorerAction;
+use crate::layers::leap::LeapAction;
 use crate::layers::notification::Notification;
+use crate::layers::picker::PickerAction;
+use crate::layers::search_prompt::PromptAction;
 use crate::theme::Theme;
 
 #[derive(Debug, Default, Deserialize)]
@@ -52,6 +57,13 @@ pub struct Keys {
     pub normal: BTreeMap<String, String>,
     pub visual: BTreeMap<String, String>,
     pub insert: BTreeMap<String, String>,
+    /// Layer-local bindings: stroke → action id (see each layer's action
+    /// enum: `ExplorerAction`, `PickerAction`, …).
+    pub explorer: BTreeMap<String, String>,
+    pub picker: BTreeMap<String, String>,
+    pub prompt: BTreeMap<String, String>,
+    pub dialog: BTreeMap<String, String>,
+    pub leap: BTreeMap<String, String>,
 }
 
 impl Config {
@@ -100,6 +112,34 @@ impl Config {
     }
 }
 
+/// Apply one layer's `[keys.<scope>]` table: parse strokes, resolve action
+/// ids, prepend (user binds shadow defaults), warn on anything unknown.
+fn apply_layer<T: Copy>(
+    scope: &str,
+    table: &BTreeMap<String, String>,
+    from_id: fn(&str) -> Option<T>,
+    target: &mut Vec<(KeyStroke, T)>,
+    warnings: &mut Vec<String>,
+) {
+    let entries = table
+        .iter()
+        .filter_map(
+            |(stroke, id)| match (KeyStroke::parse(stroke), from_id(id)) {
+                (Some(stroke), Some(action)) => Some((stroke, action)),
+                (None, _) => {
+                    warnings.push(format!("keys.{scope}: bad stroke '{stroke}'"));
+                    None
+                }
+                (_, None) => {
+                    warnings.push(format!("keys.{scope}: unknown action '{id}'"));
+                    None
+                }
+            },
+        )
+        .collect::<Vec<_>>();
+    target.splice(0..0, entries);
+}
+
 impl Keys {
     fn apply(self, app: &mut App, warnings: &mut Vec<String>) {
         for (stroke, id) in &self.global {
@@ -132,6 +172,42 @@ impl Keys {
                 .collect::<Vec<_>>();
             app.keymaps.override_keys(mode, entries);
         }
+        // Layer-local keymaps: same shadowing, typed per layer.
+        apply_layer(
+            "explorer",
+            &self.explorer,
+            ExplorerAction::from_id,
+            &mut app.layer_keys.explorer,
+            warnings,
+        );
+        apply_layer(
+            "picker",
+            &self.picker,
+            PickerAction::from_id,
+            &mut app.layer_keys.picker,
+            warnings,
+        );
+        apply_layer(
+            "prompt",
+            &self.prompt,
+            PromptAction::from_id,
+            &mut app.layer_keys.prompt,
+            warnings,
+        );
+        apply_layer(
+            "dialog",
+            &self.dialog,
+            DialogAction::from_id,
+            &mut app.layer_keys.dialog,
+            warnings,
+        );
+        apply_layer(
+            "leap",
+            &self.leap,
+            LeapAction::from_id,
+            &mut app.layer_keys.leap,
+            warnings,
+        );
     }
 }
 
@@ -181,6 +257,54 @@ mod tests {
         assert_eq!(
             crate::editing::resolve(&mut Default::default(), Mode::Normal, key, &keymaps),
             crate::editing::Resolved::Act(EditorAction::EnterInsert, 1)
+        );
+    }
+
+    #[test]
+    fn layer_keymaps_override_and_warn() {
+        let config: Config = toml::from_str(
+            r#"
+                [keys.explorer]
+                "u" = "up"
+                "j" = "bogus"
+                [keys.picker]
+                "C-j" = "down"
+            "#,
+        )
+        .unwrap();
+        let mut app = App::new(eggplant_core::Editor::scratch().unwrap());
+        config.apply(&mut app);
+
+        let key = |code, mods| crossterm::event::KeyEvent::new(code, mods);
+        use crossterm::event::{KeyCode, KeyModifiers};
+        // 'u' now means up in the explorer…
+        assert_eq!(
+            crate::editing::lookup(
+                &app.layer_keys.explorer,
+                &key(KeyCode::Char('u'), KeyModifiers::NONE)
+            ),
+            Some(ExplorerAction::MoveUp)
+        );
+        // …'j' still means down (bogus id warned, default intact)…
+        assert_eq!(
+            crate::editing::lookup(
+                &app.layer_keys.explorer,
+                &key(KeyCode::Char('j'), KeyModifiers::NONE)
+            ),
+            Some(ExplorerAction::MoveDown)
+        );
+        // …and the picker gained C-j.
+        assert_eq!(
+            crate::editing::lookup(
+                &app.layer_keys.picker,
+                &key(KeyCode::Char('j'), KeyModifiers::CONTROL)
+            ),
+            Some(PickerAction::MoveDown)
+        );
+        assert!(
+            app.notifications
+                .iter()
+                .any(|n| n.message().contains("unknown action 'bogus'"))
         );
     }
 

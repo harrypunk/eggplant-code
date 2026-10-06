@@ -7,10 +7,55 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::App;
+use crate::commands::KeyStroke;
 use crate::components::picker::{self, PickerItem, PickerProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
 use crate::fuzzy;
+
+/// The picker's closed action set (config: `[keys.picker]`). Typed chars
+/// and Backspace edit the filter — text-field behavior, not bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerAction {
+    MoveDown,
+    MoveUp,
+    Confirm,
+    Close,
+}
+
+impl PickerAction {
+    pub fn from_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "down" => Self::MoveDown,
+            "up" => Self::MoveUp,
+            "confirm" => Self::Confirm,
+            "close" => Self::Close,
+            _ => return None,
+        })
+    }
+}
+
+/// Default picker bindings.
+pub const DEFAULT_KEYS: &[(KeyStroke, PickerAction)] = &[
+    (
+        KeyStroke::new(KeyCode::Down, KeyModifiers::NONE),
+        PickerAction::MoveDown,
+    ),
+    (
+        KeyStroke::new(KeyCode::Up, KeyModifiers::NONE),
+        PickerAction::MoveUp,
+    ),
+    (KeyStroke::ctrl('n'), PickerAction::MoveDown),
+    (KeyStroke::ctrl('p'), PickerAction::MoveUp),
+    (
+        KeyStroke::new(KeyCode::Enter, KeyModifiers::NONE),
+        PickerAction::Confirm,
+    ),
+    (
+        KeyStroke::new(KeyCode::Esc, KeyModifiers::NONE),
+        PickerAction::Close,
+    ),
+];
 
 /// What makes a picker concrete: its items plus three function pointers —
 /// how to filter, how to display, what Enter does.
@@ -82,20 +127,25 @@ impl<T: 'static> Layer for Picker<T> {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+        if let Some(action) = crate::editing::lookup(&app.layer_keys.picker, &key) {
+            return match action {
+                PickerAction::Confirm => match self.filtered().get(self.selected) {
+                    Some(item) => (self.spec.on_select)(item, app),
+                    None => KeyResult::Close,
+                },
+                PickerAction::Close => KeyResult::Close,
+                PickerAction::MoveUp => {
+                    self.move_selection(-1);
+                    KeyResult::Consumed
+                }
+                PickerAction::MoveDown => {
+                    self.move_selection(1);
+                    KeyResult::Consumed
+                }
+            };
+        }
+        // Text entry (not bindings): chars filter, Backspace edits.
         match key.code {
-            KeyCode::Esc => KeyResult::Close,
-            KeyCode::Enter => match self.filtered().get(self.selected) {
-                Some(item) => (self.spec.on_select)(item, app),
-                None => KeyResult::Close,
-            },
-            KeyCode::Up => {
-                self.move_selection(-1);
-                KeyResult::Consumed
-            }
-            KeyCode::Down => {
-                self.move_selection(1);
-                KeyResult::Consumed
-            }
             KeyCode::Backspace => {
                 self.input.pop();
                 self.selected = 0;

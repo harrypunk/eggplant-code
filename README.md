@@ -127,6 +127,15 @@ theme = "classic"          # built-in theme name
 [keys.insert]
 # ...
 
+# Layer-local bindings: stroke → action id. Action ids per layer:
+#   explorer: down up expand collapse toggle-all open unfocus
+#   picker:   down up confirm close
+#   prompt / dialog / leap: confirm close / confirm cancel / close
+[keys.explorer]
+# "u" = "up"
+[keys.picker]
+# "C-j" = "down"
+
 [files]                    # file picker ignore list (gitignore syntax)
 ignore = ["dist/", "!target/"]   # add a pattern; ! re-includes a default
 ```

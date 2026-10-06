@@ -16,6 +16,7 @@ pub mod element;
 pub mod files;
 pub mod filetree;
 pub mod fuzzy;
+pub mod keymaps;
 pub mod layers;
 pub mod runner;
 pub mod startup;

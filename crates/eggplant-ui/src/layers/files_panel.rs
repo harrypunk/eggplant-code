@@ -18,6 +18,7 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
 use crate::app::App;
+use crate::commands::KeyStroke;
 use crate::components::files_panel::{self, FilesPanelProps, RowKind, RowProps};
 use crate::compositor::{KeyResult, Layer, LayerKind, Side};
 use crate::element::Element;
@@ -26,6 +27,71 @@ use crate::layers::notification::Notification;
 
 pub const PANEL_ID: &str = "files";
 const WIDTH: u16 = 32;
+
+/// The explorer's closed action set — keys are data (see
+/// `crate::keymaps`), config-overridable via `[keys.explorer]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExplorerAction {
+    MoveDown,
+    MoveUp,
+    ExpandOrDescend,
+    CollapseOrParent,
+    ToggleAll,
+    Open,
+    Unfocus,
+}
+
+impl ExplorerAction {
+    pub fn from_id(id: &str) -> Option<Self> {
+        Some(match id {
+            "down" => Self::MoveDown,
+            "up" => Self::MoveUp,
+            "expand" => Self::ExpandOrDescend,
+            "collapse" => Self::CollapseOrParent,
+            "toggle-all" => Self::ToggleAll,
+            "open" => Self::Open,
+            "unfocus" => Self::Unfocus,
+            _ => return None,
+        })
+    }
+}
+
+/// Default explorer bindings.
+pub const DEFAULT_KEYS: &[(KeyStroke, ExplorerAction)] = &[
+    (KeyStroke::char('j'), ExplorerAction::MoveDown),
+    (
+        KeyStroke::new(KeyCode::Down, KeyModifiers::NONE),
+        ExplorerAction::MoveDown,
+    ),
+    (KeyStroke::char('k'), ExplorerAction::MoveUp),
+    (
+        KeyStroke::new(KeyCode::Up, KeyModifiers::NONE),
+        ExplorerAction::MoveUp,
+    ),
+    (KeyStroke::char('l'), ExplorerAction::ExpandOrDescend),
+    (
+        KeyStroke::new(KeyCode::Right, KeyModifiers::NONE),
+        ExplorerAction::ExpandOrDescend,
+    ),
+    (KeyStroke::char('h'), ExplorerAction::CollapseOrParent),
+    (
+        KeyStroke::new(KeyCode::Left, KeyModifiers::NONE),
+        ExplorerAction::CollapseOrParent,
+    ),
+    (
+        KeyStroke::new(KeyCode::Backspace, KeyModifiers::NONE),
+        ExplorerAction::CollapseOrParent,
+    ),
+    (KeyStroke::char('I'), ExplorerAction::ToggleAll),
+    (
+        KeyStroke::new(KeyCode::Enter, KeyModifiers::NONE),
+        ExplorerAction::Open,
+    ),
+    (
+        KeyStroke::new(KeyCode::Esc, KeyModifiers::NONE),
+        ExplorerAction::Unfocus,
+    ),
+];
 
 pub struct FilesPanel {
     tree: FileTree,
@@ -189,36 +255,33 @@ impl Layer for FilesPanel {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        // Plain letters only: Ctrl/Alt-modified keys (C-l, C-h…) belong to
-        // the global keymap (window focus moves through the panel too).
-        if key
-            .modifiers
-            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-        {
+        // Keys are data: exact-modifier lookup means Ctrl/Alt keys (C-l,
+        // C-h…) never match plain-letter bindings and fall through to the
+        // global keymap on their own.
+        let Some(action) = crate::editing::lookup(&app.layer_keys.explorer, &key) else {
             return KeyResult::Ignored;
-        }
-        match key.code {
-            KeyCode::Esc => KeyResult::Unfocus,
-            KeyCode::Char('j') | KeyCode::Down => {
+        };
+        match action {
+            ExplorerAction::MoveDown => {
                 self.move_selection(1, app);
                 KeyResult::Consumed
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            ExplorerAction::MoveUp => {
                 self.move_selection(-1, app);
                 KeyResult::Consumed
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            ExplorerAction::ExpandOrDescend => {
                 if let Err(err) = self.expand_or_descend(app) {
                     app.notifications
                         .push(Notification::error(format!("cannot read directory: {err}")));
                 }
                 KeyResult::Consumed
             }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Backspace => {
+            ExplorerAction::CollapseOrParent => {
                 self.collapse_or_parent(app);
                 KeyResult::Consumed
             }
-            KeyCode::Char('I') => {
+            ExplorerAction::ToggleAll => {
                 let show_all = self.toggle_show_all(app);
                 app.notifications.push(Notification::info(if show_all {
                     "explorer: showing all files"
@@ -227,8 +290,8 @@ impl Layer for FilesPanel {
                 }));
                 KeyResult::Consumed
             }
-            KeyCode::Enter => self.open_selected(app),
-            _ => KeyResult::Ignored,
+            ExplorerAction::Open => self.open_selected(app),
+            ExplorerAction::Unfocus => KeyResult::Unfocus,
         }
     }
 

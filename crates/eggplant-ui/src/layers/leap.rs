@@ -9,6 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::{App, Leap, LeapLabel};
+use crate::commands::KeyStroke;
 use crate::components::prompt::{self, PromptProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
@@ -46,6 +47,28 @@ impl Leap {
     }
 }
 
+/// Leap's closed action set (config: `[keys.leap]`). Pattern chars,
+/// Backspace and label keys are input, not bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LeapAction {
+    Close,
+}
+
+impl LeapAction {
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "close" => Some(Self::Close),
+            _ => None,
+        }
+    }
+}
+
+/// Default leap bindings.
+pub const DEFAULT_KEYS: &[(KeyStroke, LeapAction)] = &[(
+    KeyStroke::new(KeyCode::Esc, KeyModifiers::NONE),
+    LeapAction::Close,
+)];
+
 pub struct LeapLayer;
 
 impl Layer for LeapLayer {
@@ -62,11 +85,11 @@ impl Layer for LeapLayer {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+        if crate::editing::lookup(&app.layer_keys.leap, &key) == Some(LeapAction::Close) {
+            app.leap = None;
+            return KeyResult::Close;
+        }
         match key.code {
-            KeyCode::Esc => {
-                app.leap = None;
-                KeyResult::Close
-            }
             KeyCode::Backspace => {
                 if let Some(leap) = &mut app.leap {
                     leap.pattern.pop();

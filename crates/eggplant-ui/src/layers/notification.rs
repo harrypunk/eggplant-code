@@ -25,6 +25,10 @@ pub struct Notification {
 }
 
 impl Notification {
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
     pub fn info(message: impl Into<String>) -> Self {
         Self::new(message, Level::Info)
     }
@@ -58,6 +62,10 @@ pub struct Notifications {
 impl Notifications {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Notification> {
+        self.items.iter()
     }
 
     pub fn push(&mut self, n: Notification) {
