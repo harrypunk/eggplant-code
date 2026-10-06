@@ -29,6 +29,44 @@ pub(crate) fn assign_labels(matches: Vec<(usize, usize)>) -> Vec<LeapLabel> {
 /// How far the pattern has been typed (2 chars total, kept simple).
 const PATTERN_LEN: usize = 2;
 
+/// What a keypress *means* to a leap in progress — resolved from state +
+/// key, so `handle_key` applies rather than interprets (same split as
+/// `editing.rs`'s resolve/interpret).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeapInput {
+    /// Backspace: drop the last pattern char, forget the labels.
+    DeleteChar,
+    /// Phase 1 (labels not yet up): extend the pattern.
+    PatternChar(char),
+    /// Phase 2 (labels up): the key picked a jump target.
+    Jump(usize, usize),
+    /// Phase 2: the key matches no label — cancel the leap.
+    Cancel,
+}
+
+/// Pure: leap state + key → semantic input. The phase (typing vs. picking)
+/// is decided here, once.
+fn resolve_input(leap: &Leap, key: &KeyEvent) -> Option<LeapInput> {
+    match key.code {
+        KeyCode::Backspace => Some(LeapInput::DeleteChar),
+        KeyCode::Char(c) if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            if leap.labels.is_empty() {
+                Some(LeapInput::PatternChar(c))
+            } else {
+                Some(
+                    leap.labels
+                        .iter()
+                        .find(|label| label.label == c)
+                        .map_or(LeapInput::Cancel, |label| {
+                            LeapInput::Jump(label.line, label.col)
+                        }),
+                )
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Leap's editor-decoration semantics — owned here, so the editor surface
 /// stays decoration-agnostic (App's selectors aggregate overlay features).
 impl Leap {
@@ -89,45 +127,42 @@ impl Layer for LeapLayer {
             app.leap = None;
             return KeyResult::Close;
         }
-        match key.code {
-            KeyCode::Backspace => {
+        let Some(leap) = &app.leap else {
+            return KeyResult::Close; // no leap in progress: nothing to do here
+        };
+        let Some(input) = resolve_input(leap, &key) else {
+            return KeyResult::Consumed; // modal-ish
+        };
+        match input {
+            LeapInput::DeleteChar => {
                 if let Some(leap) = &mut app.leap {
                     leap.pattern.pop();
                     leap.labels.clear();
                 }
                 KeyResult::Consumed
             }
-            KeyCode::Char(c)
-                if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) =>
-            {
-                let Some(leap) = &mut app.leap else {
-                    return KeyResult::Close;
-                };
-                // Labels up: a key resolves a jump target (unknown cancels).
-                if !leap.labels.is_empty() {
-                    let target = leap
-                        .labels
-                        .iter()
-                        .find(|label| label.label == c)
-                        .map(|label| (label.line, label.col));
-                    if let Some((line, col)) = target {
-                        app.editor.jump_to(line, col);
-                    }
-                    app.leap = None;
-                    return KeyResult::Close;
-                }
+            LeapInput::PatternChar(c) => {
+                let leap = app.leap.as_mut().expect("checked above");
                 leap.pattern.push(c);
                 if leap.pattern.chars().count() == PATTERN_LEN {
-                    let matches = app.editor.find_matches(&leap.pattern);
-                    leap.labels = assign_labels(matches);
-                    if leap.labels.is_empty() {
+                    let labels = assign_labels(app.editor.find_matches(&leap.pattern));
+                    if labels.is_empty() {
                         app.leap = None; // no match: done
                         return KeyResult::Close;
                     }
+                    app.leap.as_mut().expect("checked above").labels = labels;
                 }
                 KeyResult::Consumed
             }
-            _ => KeyResult::Consumed, // modal-ish
+            LeapInput::Jump(line, col) => {
+                app.editor.jump_to(line, col);
+                app.leap = None;
+                KeyResult::Close
+            }
+            LeapInput::Cancel => {
+                app.leap = None;
+                KeyResult::Close
+            }
         }
     }
 
@@ -165,6 +200,42 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn resolve_input_tracks_the_phase() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let key = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+
+        // Phase 1 (no labels): chars extend the pattern.
+        let mut leap = Leap::default();
+        assert_eq!(
+            resolve_input(&leap, &key('a')),
+            Some(LeapInput::PatternChar('a'))
+        );
+        assert_eq!(
+            resolve_input(&leap, &key('b')),
+            Some(LeapInput::PatternChar('b'))
+        );
+        leap.pattern = "ab".to_owned();
+
+        // Phase 2 (labels up): a label key jumps, an unknown key cancels.
+        leap.labels = vec![LeapLabel {
+            label: 's',
+            line: 3,
+            col: 5,
+        }];
+        assert_eq!(resolve_input(&leap, &key('s')), Some(LeapInput::Jump(3, 5)));
+        assert_eq!(resolve_input(&leap, &key('x')), Some(LeapInput::Cancel));
+
+        // Backspace edits the pattern in either phase.
+        assert_eq!(
+            resolve_input(
+                &leap,
+                &KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)
+            ),
+            Some(LeapInput::DeleteChar)
+        );
     }
 
     #[test]
