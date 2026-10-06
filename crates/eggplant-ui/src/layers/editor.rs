@@ -58,7 +58,6 @@ impl Layer for EditorSurface {
         if !app.editor.has_buffer() {
             return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
         }
-        let leap = app.leap.as_ref();
         let first = self.viewport.first_visible();
         // Full viewport: rows past the file's end render as `~` (vim-style)
         // so `zz` can center even the last line. The gutter numbers only
@@ -70,22 +69,13 @@ impl Layer for EditorSurface {
                         spans: app.editor.highlighted_line(line),
                         selection: app.editor.visual_selection_on_line(line),
                         search_marks: app.editor.search_marks_on_line(line),
-                        labels: leap
-                            .map(|leap| {
-                                leap.labels
-                                    .iter()
-                                    .filter(|label| label.line == line)
-                                    .map(|label| (label.col, label.label))
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
+                        labels: app.line_labels(line),
                     })
                     .collect(),
                 scroll: first,
                 line_count: app.editor.display_line_count(),
                 cursor: app.editor.cursor(),
-                // Dim once labels are up (leap's second phase).
-                dim: leap.is_some_and(|leap| !leap.labels.is_empty()),
+                dim: app.dims_editor_text(),
             },
             area,
             &app.theme,

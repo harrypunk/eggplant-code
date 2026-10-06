@@ -60,6 +60,24 @@ pub struct App {
 }
 
 impl App {
+    // ---- overlay selectors: how active features decorate the editor ----
+    // Narrow, stable queries; new overlay features (flash, multi-cursor…)
+    // extend these arms — the editor surface and component never change.
+
+    /// Editor-line decorations from active overlays (leap today):
+    /// `(col, label)` chips.
+    pub fn line_labels(&self, line: usize) -> Vec<(usize, char)> {
+        self.leap
+            .as_ref()
+            .map(|leap| leap.labels_on_line(line))
+            .unwrap_or_default()
+    }
+
+    /// Whether an active overlay wants the buffer text dimmed.
+    pub fn dims_editor_text(&self) -> bool {
+        self.leap.as_ref().is_some_and(Leap::dims_text)
+    }
+
     pub fn new(editor: Editor) -> Self {
         Self {
             editor,
