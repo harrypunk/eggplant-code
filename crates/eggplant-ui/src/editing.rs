@@ -255,7 +255,7 @@ pub enum ViewAction {
     CenterCursor,
     /// One page down (`C-f`): cursor and scroll follow, vim-style.
     PageDown,
-    /// One page up (`C-b`).
+    /// One page up (`C-u`).
     PageUp,
 }
 
@@ -263,7 +263,7 @@ pub enum ViewAction {
 /// machine). No count: `5 C-f` is just `C-f`.
 const VIEW_KEYS: &[(KeyStroke, ViewAction)] = &[
     (KeyStroke::ctrl('f'), ViewAction::PageDown),
-    (KeyStroke::ctrl('b'), ViewAction::PageUp),
+    (KeyStroke::ctrl('u'), ViewAction::PageUp),
 ];
 
 /// The narrow context actions execute against (interface segregation):
@@ -728,7 +728,7 @@ mod tests {
         let mut pending = PendingState::default();
         let r = resolve(&mut pending, Mode::Normal, ctrl('f'), &keymaps);
         assert_eq!(r, Resolved::View(ViewAction::PageDown));
-        let r = resolve(&mut pending, Mode::Normal, ctrl('b'), &keymaps);
+        let r = resolve(&mut pending, Mode::Normal, ctrl('u'), &keymaps);
         assert_eq!(r, Resolved::View(ViewAction::PageUp));
         // Visual too, and no count semantics (a pending count is dropped).
         let r = resolve(&mut pending, Mode::Visual, ctrl('f'), &keymaps);
