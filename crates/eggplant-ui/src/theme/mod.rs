@@ -6,6 +6,7 @@
 //! are planned for M7; the registry is the seam.
 
 pub mod derive;
+pub mod ghostty;
 pub mod spec;
 
 pub use spec::ThemeSpec;
