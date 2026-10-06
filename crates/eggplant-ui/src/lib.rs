@@ -22,3 +22,4 @@ pub mod statusline;
 pub mod terminal;
 pub mod theme;
 pub mod topbar;
+pub mod viewport;
