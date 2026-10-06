@@ -253,7 +253,18 @@ pub enum Resolved {
 pub enum ViewAction {
     /// Center the cursor line vertically (`zz`).
     CenterCursor,
+    /// One page down (`C-f`): cursor and scroll follow, vim-style.
+    PageDown,
+    /// One page up (`C-b`).
+    PageUp,
 }
+
+/// Single-stroke view keys (not sequences — those go through the pending
+/// machine). No count: `5 C-f` is just `C-f`.
+const VIEW_KEYS: &[(KeyStroke, ViewAction)] = &[
+    (KeyStroke::ctrl('f'), ViewAction::PageDown),
+    (KeyStroke::ctrl('b'), ViewAction::PageUp),
+];
 
 /// The narrow context actions execute against (interface segregation):
 /// editing semantics need the buffer facade and a notification sink —
@@ -597,6 +608,10 @@ fn resolve_modal(
         return Resolved::Swallowed;
     }
 
+    if let Some(view) = lookup(VIEW_KEYS, &key) {
+        return Resolved::View(view); // count deliberately dropped
+    }
+
     let keymap = match mode {
         Mode::Normal => &keymaps.normal,
         _ => &keymaps.visual,
@@ -702,6 +717,22 @@ mod tests {
         assert_eq!(pending.key, Some((PendingKey::View, 1)));
         let resolved = resolve(&mut pending, Mode::Visual, key('z'), &keymaps);
         assert_eq!(resolved, Resolved::View(ViewAction::CenterCursor));
+    }
+
+    #[test]
+    fn ctrl_f_b_resolve_to_page_view_intents() {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let keymaps = Keymaps::default();
+        let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
+
+        let mut pending = PendingState::default();
+        let r = resolve(&mut pending, Mode::Normal, ctrl('f'), &keymaps);
+        assert_eq!(r, Resolved::View(ViewAction::PageDown));
+        let r = resolve(&mut pending, Mode::Normal, ctrl('b'), &keymaps);
+        assert_eq!(r, Resolved::View(ViewAction::PageUp));
+        // Visual too, and no count semantics (a pending count is dropped).
+        let r = resolve(&mut pending, Mode::Visual, ctrl('f'), &keymaps);
+        assert_eq!(r, Resolved::View(ViewAction::PageDown));
     }
 
     #[test]

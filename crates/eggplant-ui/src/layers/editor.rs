@@ -50,13 +50,24 @@ impl EditorSurface {
 }
 
 impl EditorSurface {
-    /// `zz`: scroll so the cursor line sits at the vertical middle. No
-    /// count, no clamping against EOF — `~` rows fill past the end.
-    fn apply_view(&mut self, view: editing::ViewAction, app: &App) {
+    /// Viewport intents: `zz` centers the cursor line (no clamping against
+    /// EOF — `~` rows fill past the end); `C-f`/`C-b` page cursor and
+    /// scroll together, vim-style, clamped at the buffer ends.
+    fn apply_view(&mut self, view: editing::ViewAction, app: &mut App) {
+        let height = self.viewport_height.max(1);
+        let (cursor_line, _) = app.editor.cursor();
         match view {
             editing::ViewAction::CenterCursor => {
-                let (cursor_line, _) = app.editor.cursor();
-                self.scroll = cursor_line.saturating_sub(self.viewport_height.max(1) / 2);
+                self.scroll = cursor_line.saturating_sub(height / 2);
+            }
+            editing::ViewAction::PageDown => {
+                let last = app.editor.display_line_count().saturating_sub(1);
+                app.editor.move_to_line(cursor_line + height); // facade clamps
+                self.scroll = (self.scroll + height).min(last);
+            }
+            editing::ViewAction::PageUp => {
+                app.editor.move_to_line(cursor_line.saturating_sub(height));
+                self.scroll = self.scroll.saturating_sub(height);
             }
         }
     }
@@ -152,17 +163,46 @@ mod tests {
         surface.viewport_height = 5;
 
         app.editor.move_to_line(10);
-        surface.apply_view(editing::ViewAction::CenterCursor, &app);
+        surface.apply_view(editing::ViewAction::CenterCursor, &mut app);
         assert_eq!(surface.scroll, 8, "cursor 10, half-viewport 2");
 
         // Near the top the scroll clamps at 0 (saturating).
         app.editor.move_to_line(1);
-        surface.apply_view(editing::ViewAction::CenterCursor, &app);
+        surface.apply_view(editing::ViewAction::CenterCursor, &mut app);
         assert_eq!(surface.scroll, 0);
 
         // Near EOF it centers too — `~` rows fill past the end.
         app.editor.move_to_line(19);
-        surface.apply_view(editing::ViewAction::CenterCursor, &app);
+        surface.apply_view(editing::ViewAction::CenterCursor, &mut app);
         assert_eq!(surface.scroll, 17);
+    }
+
+    #[test]
+    fn ctrl_f_and_ctrl_b_page_cursor_and_scroll() {
+        let mut app = app_with_lines(30);
+        app.editor.move_to_line(0); // the fixture leaves the cursor at EOF
+        let last = app.editor.display_line_count() - 1;
+        let mut surface = EditorSurface::new();
+        surface.viewport_height = 10;
+
+        surface.apply_view(editing::ViewAction::PageDown, &mut app);
+        assert_eq!(app.editor.cursor().0, 10);
+        assert_eq!(surface.scroll, 10);
+
+        // Clamps at the last line / scroll ceiling.
+        surface.apply_view(editing::ViewAction::PageDown, &mut app);
+        surface.apply_view(editing::ViewAction::PageDown, &mut app);
+        assert_eq!(app.editor.cursor().0, last, "clamped at the last line");
+        assert_eq!(surface.scroll, last);
+
+        surface.apply_view(editing::ViewAction::PageUp, &mut app);
+        assert_eq!(app.editor.cursor().0, last - 10);
+        assert_eq!(surface.scroll, last - 10);
+
+        // Clamps at the top.
+        surface.apply_view(editing::ViewAction::PageUp, &mut app);
+        surface.apply_view(editing::ViewAction::PageUp, &mut app);
+        assert_eq!(app.editor.cursor().0, 0);
+        assert_eq!(surface.scroll, 0);
     }
 }
