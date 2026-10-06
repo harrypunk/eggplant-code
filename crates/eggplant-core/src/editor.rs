@@ -721,8 +721,9 @@ impl Editor {
             return;
         }
         let (line, col) = self.cursor();
-        let last = self.line_count().saturating_sub(1);
-        let target = line.saturating_add_signed(delta).min(last);
+        // Clamp to the last *real* line — the rope's phantom trailing line
+        // is not a place the cursor may rest.
+        let target = line.saturating_add_signed(delta).min(self.last_line());
         self.set_cursor_on_line(target, col);
     }
 
@@ -2025,6 +2026,21 @@ mod tests {
         assert_eq!(ed.find_matches("ab"), vec![(0, 0), (0, 3), (1, 1)]);
         assert_eq!(ed.find_matches(""), Vec::new());
         assert_eq!(ed.find_matches("zz"), Vec::new());
+    }
+
+    #[test]
+    fn move_down_stops_at_the_last_real_line() {
+        // A trailing-newline file has a phantom rope line below the last
+        // real one; `j` must not step onto it.
+        let path = temp_file("j-eof", "one\ntwo\n");
+        let mut ed = Editor::open(&path).unwrap();
+        ed.move_down(1);
+        assert_eq!(ed.cursor().0, 1);
+        ed.move_down(1);
+        assert_eq!(ed.cursor().0, 1, "no cursor below the last real line");
+        ed.move_down(99);
+        assert_eq!(ed.cursor().0, 1);
+        std::fs::remove_file(&path).ok();
     }
 
     #[test]
