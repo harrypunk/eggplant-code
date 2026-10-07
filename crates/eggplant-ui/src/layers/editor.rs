@@ -22,6 +22,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 #[derive(Default)]
 pub struct EditorSurface {
     viewport: Viewport,
+    /// Last area from the compositor's `resize` hook — text width feeds
+    /// viewport sync (horizontal scroll, wrap height).
+    area: Rect,
 }
 
 impl EditorSurface {
@@ -30,8 +33,19 @@ impl EditorSurface {
     }
 
     fn sync_viewport(&mut self, app: &App) {
-        self.viewport
-            .sync(app.editor.generation(), app.editor.cursor().0);
+        self.viewport.sync(
+            app.editor.generation(),
+            app.editor.cursor(),
+            app.wrap,
+            self.text_width(app),
+            &|line| app.editor.line_char_len(line),
+        );
+    }
+
+    /// Text columns available after the gutter.
+    fn text_width(&self, app: &App) -> usize {
+        (self.area.width as usize)
+            .saturating_sub(editor::gutter_width(app.editor.display_line_count()))
     }
 
     /// Viewport intents: scroll policy is the viewport's; cursor movement
@@ -58,22 +72,37 @@ impl Layer for EditorSurface {
         if !app.editor.has_buffer() {
             return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
         }
-        let first = self.viewport.first_visible();
-        // Full viewport: rows past the file's end render as `~` (vim-style)
-        // so `zz` can center even the last line. The gutter numbers only
-        // user-counted lines (display_line_count).
+        let width = self.text_width(app);
+        let line_count = app.editor.display_line_count();
+        let rows = self
+            .viewport
+            .layout_rows(app.wrap, width, &|line| app.editor.line_char_len(line))
+            .into_iter()
+            .map(|row| {
+                let gutter = if row.line >= line_count {
+                    editor::GutterMark::PastEnd
+                } else if row.start_col == 0 {
+                    editor::GutterMark::Number(row.line)
+                } else {
+                    editor::GutterMark::Continuation
+                };
+                editor::RowProps {
+                    line: EditorLine {
+                        spans: app.editor.highlighted_line(row.line),
+                        selection: app.editor.visual_selection_on_line(row.line),
+                        search_marks: app.editor.search_marks_on_line(row.line),
+                        labels: app.line_labels(row.line),
+                    },
+                    doc_line: row.line,
+                    start_col: row.start_col,
+                    gutter,
+                }
+            })
+            .collect();
         editor::view(
             &EditorProps {
-                lines: (first..first + area.height as usize)
-                    .map(|line| EditorLine {
-                        spans: app.editor.highlighted_line(line),
-                        selection: app.editor.visual_selection_on_line(line),
-                        search_marks: app.editor.search_marks_on_line(line),
-                        labels: app.line_labels(line),
-                    })
-                    .collect(),
-                scroll: first,
-                line_count: app.editor.display_line_count(),
+                rows,
+                line_count,
                 cursor: app.editor.cursor(),
                 dim: app.dims_editor_text(),
             },
@@ -83,6 +112,7 @@ impl Layer for EditorSurface {
     }
 
     fn resize(&mut self, area: Rect, app: &App) {
+        self.area = area;
         self.viewport.resize(area.height as usize);
         self.sync_viewport(app);
     }

@@ -45,6 +45,9 @@ pub struct App {
     pub theme: Theme,
     /// Which source the theme follows (fixed vs. live ghostty switch).
     pub theme_follow: crate::theme::resolve::Follow,
+    /// Line fitting: soft-wrap when true, horizontal scroll when false
+    /// (see docs/design/line-fitting.md). Toggled by `Space u w`.
+    pub wrap: bool,
     /// Pending modal input (counts, armed operators) — the statusline's
     /// showcmd-style hint reads it; `editing::resolve` mutates it.
     pub pending: PendingState,
@@ -87,6 +90,7 @@ impl App {
             registry: commands::default_registry(),
             theme: Theme::default(),
             theme_follow: crate::theme::resolve::Follow::Fixed,
+            wrap: false,
             lifecycle: Lifecycle::Running,
             pending: PendingState::default(),
             keymaps: Keymaps::default(),

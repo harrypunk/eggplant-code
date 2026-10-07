@@ -307,6 +307,15 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
             },
         ],
     },
+    KeyNode::Group {
+        key: 'u',
+        description: "+ui",
+        children: &[KeyNode::Leaf {
+            key: 'w',
+            description: "toggle wrap",
+            command: "ui.toggle-wrap",
+        }],
+    },
     KeyNode::Leaf {
         key: 'q',
         description: "quit",
@@ -351,6 +360,14 @@ pub fn default_registry() -> Registry {
             toggle_files_panel,
         ),
         Command::app("window.focus-left", "Focus window to the left", focus_left),
+        Command::app("ui.toggle-wrap", "Toggle soft-wrap", |app, _| {
+            app.wrap = !app.wrap;
+            app.notifications.push(Notification::info(if app.wrap {
+                "wrap on"
+            } else {
+                "wrap off (horizontal scroll)"
+            }));
+        }),
         Command::app(
             "window.focus-right",
             "Focus window to the right",

@@ -742,8 +742,10 @@ impl Editor {
     }
 
     /// Char length of a line's content, excluding the line ending (if any).
-    fn line_char_len(&self, line: usize) -> usize {
+    /// Out-of-range lines (past the rope's end) report 0.
+    pub fn line_char_len(&self, line: usize) -> usize {
         let text = self.doc().text();
+        let line = line.min(text.len_lines().saturating_sub(1));
         let start = text.line_to_char(line);
         let end = text.line_to_char(line + 1).max(start);
         let mut len = end.saturating_sub(start);

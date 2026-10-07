@@ -121,13 +121,14 @@ A custom, AI-native terminal editor with an opinionated UI layout.
       per-line `HighlightedSpan`s over a 12-scope `SyntaxScope` vocabulary
       (`Loader::set_scopes`, longest-prefix); theme `syntax` slots (tokyo-night palette +
       classic) color them. No grammars/queries baked into the binary.
-- [ ] **M7 — Editing UX** (nearly done): undo/redo (`u`/`U`) ✅, delete/yank/paste
+- [x] **M7 — Editing UX** ✅: undo/redo (`u`/`U`) ✅, delete/yank/paste
       (`dw`, `yy`, `p`) ✅, visual charwise + linewise (`v`, `V`) ✅, sequences (`gg`;
       `ge` deliberately skipped) ✅, search (`Space s b`/`s c` + live prompt, `n`/`N`) ✅,
       leap (`Space g c`, two-char jump with labels) ✅, view intents (`zz`, `C-f`/`C-u`
       page scroll — `C-b` dropped, clashes with tmux) ✅, count prefixes ✅,
-      pending-key/count hint in statusline ✅ (moved here from M8).
-      **Remaining**: soft-wrap / horizontal scroll for long lines.
+      pending-key/count hint in statusline ✅ (moved here from M8),
+      **soft-wrap + horizontal scroll** ✅ (`Space u w`; one line-fitting
+      policy, `DisplayRow` layout — `docs/design/line-fitting.md`).
 - [ ] **M8 — Chrome UX**: ~~custom theme files~~ → **ghostty theme following landed**
       (ThemeSpec boundary + pure derive; OSC 11 probe via termbg; focus-in + 3s re-probe;
       design doc: `docs/design/theme.md`; user TOML theme files = phase B),
