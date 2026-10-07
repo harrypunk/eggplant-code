@@ -2024,7 +2024,7 @@ mod tests {
     }
     #[test]
     fn find_matches_returns_line_col_pairs() {
-        let mut ed = editor_with("ab ab\nxab");
+        let ed = editor_with("ab ab\nxab");
         assert_eq!(ed.find_matches("ab"), vec![(0, 0), (0, 3), (1, 1)]);
         assert_eq!(ed.find_matches(""), Vec::new());
         assert_eq!(ed.find_matches("zz"), Vec::new());

@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn toggle_show_all_reveals_ignored_and_dotfiles() {
-        let (root, mut app, mut panel) = test_tree();
+        let (root, mut app, _) = test_tree();
         fs::create_dir_all(root.join("target")).unwrap();
         fs::write(root.join("target/build.o"), "").unwrap();
         fs::write(root.join(".env"), "SECRET=1").unwrap();

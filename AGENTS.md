@@ -6,7 +6,9 @@ Rules for anyone (human or AI agent) working in this repository, **in priority o
 
 Quality beats speed and cleverness, always.
 
-- `cargo build --workspace` and `cargo clippy --workspace` must stay **warning-free**.
+- `cargo build --workspace` and `cargo clippy --workspace --all-targets` must stay
+  **warning-free**. (`--all-targets` matters: without it, `#[cfg(test)]` code is not
+  linted — warnings rust-analyzer shows you then escape the gate.)
 - `cargo fmt` before committing.
 - Small, focused commits with clear messages; one logical change per commit.
 - No dead code, no commented-out code, no `TODO` without a tracking note in PLAN.md.
