@@ -11,7 +11,6 @@ use eggplant_core::input::{KeyCode, KeyModifiers};
 use crate::app::App;
 use crate::app::Leap;
 use crate::compositor::{Compositor, FocusDirection};
-use crate::editing::EditorAction;
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::file_picker;
 use crate::layers::files_panel::{self, FilesPanel};
@@ -21,6 +20,7 @@ use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
 use crate::layers::{grep, palette};
 use crate::theme::Theme;
+use eggplant_core::editing::EditorAction;
 pub use eggplant_core::input::KeyStroke;
 
 /// How a command executes. Both kinds funnel through one dispatch

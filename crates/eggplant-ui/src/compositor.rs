@@ -292,7 +292,7 @@ impl Compositor {
     pub fn execute(&mut self, command: Command, app: &mut App) {
         match command.kind {
             CommandKind::App(f) => f(app, self),
-            CommandKind::Edit(action) => crate::editing::interpret(action, 1, app),
+            CommandKind::Edit(action) => eggplant_core::editing::interpret(action, 1, app),
         }
     }
 

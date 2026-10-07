@@ -11,7 +11,6 @@ pub mod commands;
 pub mod components;
 pub mod compositor;
 pub mod config;
-pub mod editing;
 pub mod element;
 pub mod files;
 pub mod filetree;

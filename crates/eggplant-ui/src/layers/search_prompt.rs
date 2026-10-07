@@ -67,7 +67,7 @@ impl Layer for SearchPrompt {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        if let Some(action) = crate::editing::lookup(&app.layer_keys.prompt, &key) {
+        if let Some(action) = eggplant_core::editing::lookup(&app.layer_keys.prompt, &key) {
             return match action {
                 // Close clears the highlight; Confirm keeps it for n/N.
                 PromptAction::Close => {

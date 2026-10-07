@@ -9,10 +9,10 @@
 //! - [`interpret`] executes one action against [`EditorCtx`] — editing
 //!   *semantics*, one flat match, testable without `App`.
 
-use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
-use eggplant_core::{Editor, Mode, Motion};
+use crate::input::{KeyCode, KeyEvent, KeyModifiers};
+use crate::{Editor, Mode, Motion};
 
-use crate::commands::KeyStroke;
+use crate::input::KeyStroke;
 
 /// Normal-mode keys that wait for a second key: the `d`/`y` operators and
 /// the `g` prefix (`gg`).
@@ -512,7 +512,7 @@ impl Keymaps {
     }
 }
 
-pub(crate) fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
+pub fn lookup<T: Copy>(keymap: &[(KeyStroke, T)], key: &KeyEvent) -> Option<T> {
     keymap
         .iter()
         .find(|(stroke, _)| stroke.matches(key))
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn ctrl_f_b_resolve_to_page_view_intents() {
-        use eggplant_core::input::{KeyCode, KeyModifiers};
+        use crate::input::{KeyCode, KeyModifiers};
         let keymaps = Keymaps::default();
         let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
 

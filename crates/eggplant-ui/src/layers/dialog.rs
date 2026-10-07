@@ -108,7 +108,7 @@ impl Layer for ConfirmDialog {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        match crate::editing::lookup(&app.layer_keys.dialog, &key) {
+        match eggplant_core::editing::lookup(&app.layer_keys.dialog, &key) {
             Some(DialogAction::Confirm) => {
                 if let Some(on_confirm) = self.on_confirm.take() {
                     on_confirm(app);

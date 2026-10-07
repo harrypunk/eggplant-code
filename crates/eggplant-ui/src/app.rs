@@ -3,10 +3,10 @@
 use eggplant_core::Editor;
 
 use crate::commands::{self, Registry};
-use crate::editing::{EditorCtx, Keymaps, PendingState};
 use crate::files::Workspace;
 use crate::layers::notification::{Notification, Notifications};
 use crate::theme::Theme;
+use eggplant_core::editing::{EditorCtx, Keymaps, PendingState};
 
 /// Application lifecycle status. Not a `bool`: quitting is a state
 /// transition, and this is where future states land (e.g. quit reasons,
@@ -135,7 +135,7 @@ mod tests {
         let mut app = App::new(Editor::scratch().unwrap());
         assert_eq!(app.pending_hint(), None);
 
-        use crate::editing::PendingKey;
+        use eggplant_core::editing::PendingKey;
 
         app.pending.count = Some(5);
         assert_eq!(app.pending_hint().as_deref(), Some("5"));

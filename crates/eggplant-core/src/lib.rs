@@ -5,6 +5,7 @@
 //! interpret), viewport policy, workspace/files, tree, grep, fuzzy — plus
 //! the input vocabulary shells translate into (docs/design/architecture.md).
 
+pub mod editing;
 pub mod editor;
 pub mod highlight;
 pub mod input;

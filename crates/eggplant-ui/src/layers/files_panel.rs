@@ -258,7 +258,7 @@ impl Layer for FilesPanel {
         // Keys are data: exact-modifier lookup means Ctrl/Alt keys (C-l,
         // C-h…) never match plain-letter bindings and fall through to the
         // global keymap on their own.
-        let Some(action) = crate::editing::lookup(&app.layer_keys.explorer, &key) else {
+        let Some(action) = eggplant_core::editing::lookup(&app.layer_keys.explorer, &key) else {
             return KeyResult::Ignored;
         };
         match action {

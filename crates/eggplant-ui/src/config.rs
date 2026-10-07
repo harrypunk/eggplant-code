@@ -23,13 +23,13 @@ use serde::Deserialize;
 
 use crate::app::App;
 use crate::commands::KeyStroke;
-use crate::editing::EditorAction;
 use crate::layers::dialog::DialogAction;
 use crate::layers::files_panel::ExplorerAction;
 use crate::layers::leap::LeapAction;
 use crate::layers::notification::Notification;
 use crate::layers::picker::PickerAction;
 use crate::layers::search_prompt::PromptAction;
+use eggplant_core::editing::EditorAction;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -217,7 +217,7 @@ fn action_by_id(id: &str) -> Option<EditorAction> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editing::Keymaps;
+    use eggplant_core::editing::Keymaps;
 
     #[test]
     fn keystroke_parses_modifiers_names_and_chars() {
@@ -250,8 +250,8 @@ mod tests {
             eggplant_core::input::KeyModifiers::NONE,
         );
         assert_eq!(
-            crate::editing::resolve(&mut Default::default(), Mode::Normal, key, &keymaps),
-            crate::editing::Resolved::Act(EditorAction::EnterInsert, 1)
+            eggplant_core::editing::resolve(&mut Default::default(), Mode::Normal, key, &keymaps),
+            eggplant_core::editing::Resolved::Act(EditorAction::EnterInsert, 1)
         );
     }
 
@@ -274,7 +274,7 @@ mod tests {
         use eggplant_core::input::{KeyCode, KeyModifiers};
         // 'u' now means up in the explorer…
         assert_eq!(
-            crate::editing::lookup(
+            eggplant_core::editing::lookup(
                 &app.layer_keys.explorer,
                 &key(KeyCode::Char('u'), KeyModifiers::NONE)
             ),
@@ -282,7 +282,7 @@ mod tests {
         );
         // …'j' still means down (bogus id warned, default intact)…
         assert_eq!(
-            crate::editing::lookup(
+            eggplant_core::editing::lookup(
                 &app.layer_keys.explorer,
                 &key(KeyCode::Char('j'), KeyModifiers::NONE)
             ),
@@ -290,7 +290,7 @@ mod tests {
         );
         // …and the picker gained C-j.
         assert_eq!(
-            crate::editing::lookup(
+            eggplant_core::editing::lookup(
                 &app.layer_keys.picker,
                 &key(KeyCode::Char('j'), KeyModifiers::CONTROL)
             ),
@@ -318,7 +318,7 @@ mod tests {
         // unknown theme names are handled by theme::resolve, not apply;
         // the keymap falls back to defaults and a warning is raised
         assert_eq!(
-            crate::editing::resolve(
+            eggplant_core::editing::resolve(
                 &mut Default::default(),
                 Mode::Normal,
                 eggplant_core::input::KeyEvent::new(
@@ -327,7 +327,7 @@ mod tests {
                 ),
                 &app.keymaps
             ),
-            crate::editing::Resolved::Ignored
+            eggplant_core::editing::Resolved::Ignored
         );
     }
 }

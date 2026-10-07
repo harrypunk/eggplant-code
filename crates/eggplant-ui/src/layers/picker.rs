@@ -190,7 +190,7 @@ impl<T> Layer for Picker<T> {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        if let Some(action) = crate::editing::lookup(&app.layer_keys.picker, &key) {
+        if let Some(action) = eggplant_core::editing::lookup(&app.layer_keys.picker, &key) {
             return match action {
                 PickerAction::Confirm => match self.filtered().get(self.selected) {
                     Some(item) => (self.spec.on_select)(item, app),

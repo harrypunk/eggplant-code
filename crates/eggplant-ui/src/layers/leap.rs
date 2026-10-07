@@ -123,7 +123,7 @@ impl Layer for LeapLayer {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        if crate::editing::lookup(&app.layer_keys.leap, &key) == Some(LeapAction::Close) {
+        if eggplant_core::editing::lookup(&app.layer_keys.leap, &key) == Some(LeapAction::Close) {
             app.leap = None;
             return KeyResult::Close;
         }
