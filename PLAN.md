@@ -104,36 +104,60 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 - [ ] **M4 — AI v1 (native agent)** — **ON HOLD**: editor UI/UX milestones come first;
       resume when the editing experience is solid. Minimal Rust agent loop (pi-inspired):
       provider abstraction + streaming chat into a toggleable panel; agentic edits later.
-- [ ] **M5 — Command & window UX** (current focus):
+- [x] **M5 — Command & window UX** ✅
       - **Buffer topbar**: tabline chrome above the editor showing open buffers
         (neovim/vscode style): name, modified dot, current highlighted.
       - **Windows, not layers-with-focus**: editor and file explorer are equal windows;
-        navigate directionally with `C-h`/`C-l` (neovim `C-w h/l` model), replacing `C-w`
-        focus cycling (which has a hang bug when toggling back to the editor — superseded
-        by this model, verify gone).
+        navigate directionally with `C-h`/`C-l` (neovim `C-w h/l` model).
       - **Command entries, two roles** (vscode/lazyvim split):
         - palette = *complete* command list, rebound to `C-S-p` (fuzzy over registry).
-        - `Space` = which-key style prefix menu for *common* commands: popup shows
-          available subsequent keys, updates per keystroke (`Space f` file, `Space b`
-          buffers, …). Builds the keymap-tree infra M7 sequences (`gg`) will reuse.
-        - remove the `:` command line + ex table entirely (duplicate of the above;
-          fs ops like `:e`/`:ls` are covered by the explorer and later grep).
+        - `Space` = which-key style prefix menu for *common* commands (`Space f` file,
+          `Space b` buffers, `Space s` search, `Space g` goto/leap, …). Groups are nouns,
+          leaves are verbs; leaves name registry command ids.
+        - `:` command line + ex table removed (duplicate of the above).
 - [x] **M6 — Syntax highlighting** ✅ — tree-sitter via helix-core's config-driven
       `syntax::Loader` (runtime-dir queries + dynamic grammars; user `languages.toml` merge);
       `Document::detect_language` on open + incremental reparse on edit; facade exposes
       per-line `HighlightedSpan`s over a 12-scope `SyntaxScope` vocabulary
       (`Loader::set_scopes`, longest-prefix); theme `syntax` slots (tokyo-night palette +
       classic) color them. No grammars/queries baked into the binary.
-- [ ] **M7 — Editing UX**: undo/redo (`u`/`U`), delete/yank/paste with textobjects
-      (`dw`, `yy`, `p`), visual mode (`v`), key sequences (`gg`, `ge` — keymap-tree infra
-      lands in M5 via which-key), search (`/`), horizontal scroll or soft-wrap (long lines
-      are unreachable today).
-- [ ] **M8 — Chrome UX**: custom theme files (ghostty-style
-      `~/.config/eggplant/themes/*.toml`), per-buffer view memory (cursor+scroll survive
-      buffer switches), pending-key/count display in statusline, mouse support.
+- [ ] **M7 — Editing UX** (nearly done): undo/redo (`u`/`U`) ✅, delete/yank/paste
+      (`dw`, `yy`, `p`) ✅, visual charwise + linewise (`v`, `V`) ✅, sequences (`gg`;
+      `ge` deliberately skipped) ✅, search (`Space s b`/`s c` + live prompt, `n`/`N`) ✅,
+      leap (`Space g c`, two-char jump with labels) ✅, view intents (`zz`, `C-f`/`C-u`
+      page scroll — `C-b` dropped, clashes with tmux) ✅, count prefixes ✅,
+      pending-key/count hint in statusline ✅ (moved here from M8).
+      **Remaining**: soft-wrap / horizontal scroll for long lines.
+- [ ] **M8 — Chrome UX**: ~~custom theme files~~ → **ghostty theme following landed**
+      (ThemeSpec boundary + pure derive; OSC 11 probe via termbg; focus-in + 3s re-probe;
+      design doc: `docs/design/theme.md`; user TOML theme files = phase B),
+      per-buffer view memory (cursor+scroll survive buffer switches), mouse support.
 - [ ] **M9 — LSP**: diagnostics/goto/completion via helix-lsp (reused, behind the facade).
+      Ready seams: `g d` is one arm in the resolver; picker infra covers references/symbols.
 - [ ] **M10 — AI v1 resumes** (unhold M4), then AI v2: agentic edits w/ diff review.
 - [ ] **M11+ — extras**: file picker/tree, splits/tabs, git (helix-vcs), DAP, own core R&D.
+
+## Post-M6 hardening (landed, no milestone number)
+
+- **Config file**: single `~/.config/eggplant/config.toml` — `[theme]`, `[keys.*]`,
+  `[files]`; errors become startup notifications, never crashes.
+- **Every keymap is data**: three tiers — global `Registry` (`[keys.global]`), modal
+  `Keymaps` (`[keys.normal/visual/insert]`), layer-local `LayerKeymaps`
+  (`[keys.explorer/picker/prompt/dialog/leap]`, closed action enums + `DEFAULT_KEYS`
+  tables per layer). Exact-modifier stroke matching designed out the C-l shadowing bug
+  class. Text entry (chars/Backspace) is deliberately not a binding.
+- **File picker `Space f p`**: `ignore`-crate walker (respects .gitignore, skips hidden,
+  20k cap) + gitignore-syntax ignore list (`[files] ignore`, defaults first so `!pattern`
+  re-includes); explorer shares the rules + `I` toggle.
+- **Refactor pass (user-driven SOLID)**: `Viewport` (scroll policy, pure), overlay
+  selectors on App (`line_labels`/`dims_editor_text` — surface is decoration-agnostic),
+  `FileTree` (tree policy + injected `DirLister`), `Workspace` (root+ignores cohesive).
+- **Editing pipeline**: Redux-style — keymaps are data, `resolve()` is a state machine,
+  `interpret()` is semantics, `EditorCtx` a narrow trait; leap got the same
+  resolve/interpret split at layer scale.
+- **Fixes**: zero-buffer honest state, gutter line count (phantom rope line), `j` clamps
+  at last real line, focus = compositor state (`CloseUnfocus`), panels pass Ctrl/Alt keys
+  through.
 
 ## Workspace layout
 
@@ -141,9 +165,12 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 eggplant-code/
 ├── Cargo.toml            # virtual workspace manifest (shared deps)
 ├── AGENTS.md             # repo rules: quality first, SOLID, branch-per-work
+├── docs/design/          # subsystem design docs (theme.md, …)
 └── crates/
     ├── eggplant/         # binary: event loop + wiring (package: eggplant-code)
-    ├── eggplant-ui/      # compositor, layers, widgets, UI state (ratatui)
+    ├── eggplant-ui/      # compositor, layers, components, editing pipeline,
+    │                     # keymaps (all data), theme/, filetree, workspace,
+    │                     # viewport (ratatui)
     ├── eggplant-core/    # editor backend facade (v1 wraps helix-core)
     └── eggplant-agent/   # native Rust AI agent (placeholder, lands in M4)
 ```
@@ -182,3 +209,17 @@ eggplant-code/
   `Execute(Command)`, `RunEx(input)`; the compositor performs them (close-then-run semantics).
 - `Command` is `Copy` (fn ptr + &'static str) so registry lookups return by value — avoids
   borrow conflicts when executing with `&mut App`.
+- **Rope line count includes a phantom trailing line** — `last_line()` (= count−1) is the
+  law for all vertical motion; `display_line_count()` (= last+1) for gutter/clamping.
+  Scratch docs start with a placeholder newline, so tests must use real temp files.
+- **`DocumentId::default()` always returns 1** — buffer slots use our own `usize`.
+- **crossterm reports Ctrl+char as `Char(c)` + CONTROL** — code-only matches eat global
+  keys; exact-modifier `KeyStroke::matches` made the whole guard class unnecessary.
+- **`ignore` crate gotchas**: `filter_entry` is a `WalkBuilder` method needing a `'static`
+  closure (clone rules in); `GitignoreBuilder::new(root)` + `add_line`, `matched(rel, is_dir)`.
+- **OSC 11 is the terminal-theme truth** — ghostty (and anything modern) answers it; the
+  OS portal is the wrong layer for child processes. `termbg` does the raw-tty dance next
+  to crossterm safely; a failing probe must die permanently or every retry costs a timeout.
+- **Semantic resolution scales down**: the Redux split (resolve = pure meaning,
+  interpret = apply) works at layer scale too — leap's phase machine became a testable
+  pure fn. `handle_key` that still matches `KeyCode` is a smell.
