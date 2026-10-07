@@ -4,7 +4,9 @@
 //! global keymap triggers them). The `Registry` owns every command once;
 //! key bindings are a declarative table of references into it.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::input::KeyEvent;
+#[cfg(test)]
+use eggplant_core::input::{KeyCode, KeyModifiers};
 
 use crate::app::App;
 use crate::app::Leap;
@@ -19,93 +21,7 @@ use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
 use crate::layers::{grep, palette};
 use crate::theme::Theme;
-
-/// A key + modifier combination that can trigger a command.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KeyStroke {
-    code: KeyCode,
-    modifiers: KeyModifiers,
-}
-
-impl KeyStroke {
-    pub const fn new(code: KeyCode, modifiers: KeyModifiers) -> Self {
-        Self { code, modifiers }
-    }
-
-    pub const fn char(c: char) -> Self {
-        Self::new(KeyCode::Char(c), KeyModifiers::NONE)
-    }
-
-    pub const fn ctrl(c: char) -> Self {
-        Self::new(KeyCode::Char(c), KeyModifiers::CONTROL)
-    }
-
-    pub const fn ctrl_shift(c: char) -> Self {
-        Self::new(
-            KeyCode::Char(c),
-            KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
-        )
-    }
-
-    pub const fn function(n: u8) -> Self {
-        Self::new(KeyCode::F(n), KeyModifiers::NONE)
-    }
-
-    /// Parse a config-file stroke: `"C-S-p"`, `"Space"`, `"g"`, `"F2"`,
-    /// `"left"`. Modifiers are `-`-prefixed (`C-`/`A-`/`S-`), key names are
-    /// case-insensitive, a single char keeps its case (`G` ≠ `g`).
-    pub fn parse(text: &str) -> Option<Self> {
-        let (mods, key) = match text.rsplit_once('-') {
-            Some((mods, key)) if !key.is_empty() => (mods, key),
-            _ => ("", text),
-        };
-        let mut modifiers = KeyModifiers::NONE;
-        for m in mods.split('-').filter(|m| !m.is_empty()) {
-            modifiers |= match m.to_ascii_lowercase().as_str() {
-                "c" | "ctrl" => KeyModifiers::CONTROL,
-                "a" | "alt" => KeyModifiers::ALT,
-                "s" | "shift" => KeyModifiers::SHIFT,
-                _ => return None,
-            };
-        }
-        let code = match key.to_ascii_lowercase().as_str() {
-            "space" => KeyCode::Char(' '),
-            "esc" => KeyCode::Esc,
-            "enter" => KeyCode::Enter,
-            "tab" => KeyCode::Tab,
-            "backspace" => KeyCode::Backspace,
-            "delete" => KeyCode::Delete,
-            "left" => KeyCode::Left,
-            "right" => KeyCode::Right,
-            "up" => KeyCode::Up,
-            "down" => KeyCode::Down,
-            f if f.len() >= 2
-                && f.len() <= 3
-                && f.starts_with('f')
-                && f[1..].chars().all(|c| c.is_ascii_digit()) =>
-            {
-                KeyCode::F(f[1..].parse().ok()?)
-            }
-            _ if key.chars().count() == 1 => {
-                KeyCode::Char(key.chars().next().expect("len checked"))
-            }
-            _ => return None,
-        };
-        Some(Self::new(code, modifiers))
-    }
-
-    pub fn matches(&self, key: &KeyEvent) -> bool {
-        if self.code != key.code {
-            return false;
-        }
-        if self.modifiers == key.modifiers {
-            return true;
-        }
-        // Shift alone doesn't change which char a plain binding means —
-        // crossterm already reports the shifted char (e.g. 'G', '$').
-        self.modifiers.is_empty() && key.modifiers == KeyModifiers::SHIFT
-    }
-}
+pub use eggplant_core::input::KeyStroke;
 
 /// How a command executes. Both kinds funnel through one dispatch
 /// (`Compositor::execute`): the palette, the which-key tree, global keys,

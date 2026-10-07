@@ -6,7 +6,7 @@
 //! `crate::viewport`, moves the cursor through the `Editor` facade, and
 //! maps state to props. It owns no logic of its own.
 
-use crossterm::event::KeyEvent;
+use eggplant_core::input::KeyEvent;
 use ratatui::layout::Rect;
 
 use crate::app::App;

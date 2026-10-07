@@ -8,7 +8,7 @@
 //!   never cycles. Floats are modal: while one is open it holds key focus, and
 //!   closing it returns focus to the previously focused window.
 
-use crossterm::event::KeyEvent;
+use eggplant_core::input::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 
@@ -454,8 +454,8 @@ mod tests {
     fn close_unfocus_lands_on_base_not_the_previous_window() {
         // File-picked-from-explorer scenario: panel focused, float opens,
         // float closes with CloseUnfocus → focus = base editor, not panel.
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         use eggplant_core::Editor;
+        use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 
         struct Closer;
         impl Layer for Closer {

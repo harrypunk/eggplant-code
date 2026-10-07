@@ -9,7 +9,7 @@
 //! - [`interpret`] executes one action against [`EditorCtx`] — editing
 //!   *semantics*, one flat match, testable without `App`.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use eggplant_core::{Editor, Mode, Motion};
 
 use crate::commands::KeyStroke;
@@ -721,7 +721,7 @@ mod tests {
 
     #[test]
     fn ctrl_f_b_resolve_to_page_view_intents() {
-        use crossterm::event::{KeyCode, KeyModifiers};
+        use eggplant_core::input::{KeyCode, KeyModifiers};
         let keymaps = Keymaps::default();
         let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
 

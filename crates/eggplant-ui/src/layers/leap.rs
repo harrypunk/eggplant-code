@@ -5,7 +5,7 @@
 //! Stateless itself: the leap state lives in `App::leap` because the
 //! editor surface below renders it (Rule 5 — views derive from App).
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::{App, Leap, LeapLabel};
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn resolve_input_tracks_the_phase() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
         let key = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
 
         // Phase 1 (no labels): chars extend the pattern.

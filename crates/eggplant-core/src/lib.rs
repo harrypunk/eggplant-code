@@ -1,11 +1,13 @@
-//! eggplant-core — editor backend facade.
+//! eggplant-core — the headless editor engine.
 //!
-//! The UI talks to the editing backend through this crate only, so the
-//! backend (v1: helix-core/helix-view) can be swapped for our own core later
-//! without touching the UI.
+//! Everything that makes an editor an editor, with zero terminal
+//! dependencies: the helix facade, the editing pipeline (keymaps, resolve,
+//! interpret), viewport policy, workspace/files, tree, grep, fuzzy — plus
+//! the input vocabulary shells translate into (docs/design/architecture.md).
 
 pub mod editor;
 pub mod highlight;
+pub mod input;
 pub mod mode;
 
 pub use editor::{BufferInfo, Editor, Motion, Register};

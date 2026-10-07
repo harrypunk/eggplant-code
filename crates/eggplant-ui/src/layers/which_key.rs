@@ -2,7 +2,7 @@
 //! `KeyNode` tree in `commands.rs`, showing available keys per level.
 //! Leaf keys execute registry commands; group keys descend. `Esc` closes.
 
-use crossterm::event::{KeyCode, KeyEvent};
+use eggplant_core::input::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 
 use crate::app::App;

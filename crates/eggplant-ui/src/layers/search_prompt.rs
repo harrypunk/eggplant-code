@@ -2,7 +2,7 @@
 //! search live on every keystroke (incsearch-style), delegates rendering to
 //! the pure `components::prompt` view.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::App;

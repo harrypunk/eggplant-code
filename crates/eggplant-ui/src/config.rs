@@ -228,8 +228,8 @@ mod tests {
         assert_eq!(
             KeyStroke::parse("left"),
             Some(KeyStroke::new(
-                crossterm::event::KeyCode::Left,
-                crossterm::event::KeyModifiers::NONE
+                eggplant_core::input::KeyCode::Left,
+                eggplant_core::input::KeyModifiers::NONE
             ))
         );
         assert_eq!(KeyStroke::parse("C-q"), Some(KeyStroke::ctrl('q')));
@@ -245,9 +245,9 @@ mod tests {
             Mode::Normal,
             vec![(KeyStroke::char(';'), EditorAction::EnterInsert)],
         );
-        let key = crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Char(';'),
-            crossterm::event::KeyModifiers::NONE,
+        let key = eggplant_core::input::KeyEvent::new(
+            eggplant_core::input::KeyCode::Char(';'),
+            eggplant_core::input::KeyModifiers::NONE,
         );
         assert_eq!(
             crate::editing::resolve(&mut Default::default(), Mode::Normal, key, &keymaps),
@@ -270,8 +270,8 @@ mod tests {
         let mut app = App::new(eggplant_core::Editor::scratch().unwrap());
         config.apply(&mut app);
 
-        let key = |code, mods| crossterm::event::KeyEvent::new(code, mods);
-        use crossterm::event::{KeyCode, KeyModifiers};
+        let key = |code, mods| eggplant_core::input::KeyEvent::new(code, mods);
+        use eggplant_core::input::{KeyCode, KeyModifiers};
         // 'u' now means up in the explorer…
         assert_eq!(
             crate::editing::lookup(
@@ -321,9 +321,9 @@ mod tests {
             crate::editing::resolve(
                 &mut Default::default(),
                 Mode::Normal,
-                crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Char(';'),
-                    crossterm::event::KeyModifiers::NONE
+                eggplant_core::input::KeyEvent::new(
+                    eggplant_core::input::KeyCode::Char(';'),
+                    eggplant_core::input::KeyModifiers::NONE
                 ),
                 &app.keymaps
             ),

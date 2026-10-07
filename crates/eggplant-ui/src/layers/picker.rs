@@ -9,7 +9,7 @@
 //! - `preview_of`: materializes the selected item's preview at event time
 //!   (Rule 5: I/O here, never in the view).
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::App;

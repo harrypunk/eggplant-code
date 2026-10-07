@@ -1,6 +1,6 @@
 //! Floating dialog layers: a generic message dialog and a yes/no confirm dialog.
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::App;
