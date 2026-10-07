@@ -35,8 +35,7 @@ fn event_loop(
         // Tick: drain expired notifications, re-probe the terminal theme
         // (the backstop for OS light/dark flips while we're focused).
         app.notifications.retain_visible();
-        app.tick_count = app.tick_count.wrapping_add(1);
-        if app.tick_count.is_multiple_of(THEME_PROBE_EVERY_TICKS) {
+        if app.theme.tick() {
             refresh_theme(app, &mut probe);
         }
 
@@ -47,14 +46,9 @@ fn event_loop(
     Ok(())
 }
 
-/// A theme probe every ~3s (250ms ticks) — cheap (one OSC 11 round-trip),
-/// and only while following a live-switching source.
-const THEME_PROBE_EVERY_TICKS: u32 = 12;
-
 /// Re-derive the theme if the terminal flipped light/dark.
 fn refresh_theme(app: &mut App, probe: &mut impl crate::theme::probe::DarknessProbe) {
-    if let Some(theme) = crate::theme::resolve::refresh(&mut app.theme_follow, probe) {
-        app.theme = theme;
+    if app.theme.refresh(probe) {
         app.notifications
             .push(crate::layers::notification::Notification::info(
                 "theme: followed the terminal's light/dark switch",
@@ -148,7 +142,7 @@ fn translate_key(key: crossterm::event::KeyEvent) -> Option<eggplant_core::input
 /// everything); the global keymap is the fallback.
 fn dispatch_key(key: eggplant_core::input::KeyEvent, app: &mut App, compositor: &mut Compositor) {
     if matches!(compositor.dispatch_key(key, app), KeyResult::Ignored)
-        && let Some(command) = app.registry.lookup_key(&key)
+        && let Some(command) = app.input.registry.lookup_key(&key)
     {
         compositor.execute(command, app);
     }

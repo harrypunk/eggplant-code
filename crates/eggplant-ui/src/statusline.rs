@@ -24,6 +24,6 @@ pub fn view(app: &App, focused_layer: Option<&'static str>, area: Rect) -> Eleme
             focused_layer,
         },
         area,
-        &app.theme,
+        &app.theme.current,
     )
 }

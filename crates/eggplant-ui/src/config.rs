@@ -139,7 +139,9 @@ impl Keys {
     fn apply(self, app: &mut App, warnings: &mut Vec<String>) {
         for (stroke, id) in &self.global {
             match KeyStroke::parse(stroke) {
-                Some(stroke) if app.registry.by_id(id).is_some() => app.registry.bind(stroke, id),
+                Some(stroke) if app.input.registry.by_id(id).is_some() => {
+                    app.input.registry.bind(stroke, id)
+                }
                 Some(_) => warnings.push(format!("keys.global: unknown command '{id}'")),
                 None => warnings.push(format!("keys.global: bad stroke '{stroke}'")),
             }
@@ -165,42 +167,42 @@ impl Keys {
                     },
                 )
                 .collect::<Vec<_>>();
-            app.keymaps.override_keys(mode, entries);
+            app.input.keymaps.override_keys(mode, entries);
         }
         // Layer-local keymaps: same shadowing, typed per layer.
         apply_layer(
             "explorer",
             &self.explorer,
             ExplorerAction::from_id,
-            &mut app.layer_keys.explorer,
+            &mut app.input.layer_keys.explorer,
             warnings,
         );
         apply_layer(
             "picker",
             &self.picker,
             PickerAction::from_id,
-            &mut app.layer_keys.picker,
+            &mut app.input.layer_keys.picker,
             warnings,
         );
         apply_layer(
             "prompt",
             &self.prompt,
             PromptAction::from_id,
-            &mut app.layer_keys.prompt,
+            &mut app.input.layer_keys.prompt,
             warnings,
         );
         apply_layer(
             "dialog",
             &self.dialog,
             DialogAction::from_id,
-            &mut app.layer_keys.dialog,
+            &mut app.input.layer_keys.dialog,
             warnings,
         );
         apply_layer(
             "leap",
             &self.leap,
             LeapAction::from_id,
-            &mut app.layer_keys.leap,
+            &mut app.input.layer_keys.leap,
             warnings,
         );
     }
@@ -275,7 +277,7 @@ mod tests {
         // 'u' now means up in the explorer…
         assert_eq!(
             eggplant_core::editing::lookup(
-                &app.layer_keys.explorer,
+                &app.input.layer_keys.explorer,
                 &key(KeyCode::Char('u'), KeyModifiers::NONE)
             ),
             Some(ExplorerAction::MoveUp)
@@ -283,7 +285,7 @@ mod tests {
         // …'j' still means down (bogus id warned, default intact)…
         assert_eq!(
             eggplant_core::editing::lookup(
-                &app.layer_keys.explorer,
+                &app.input.layer_keys.explorer,
                 &key(KeyCode::Char('j'), KeyModifiers::NONE)
             ),
             Some(ExplorerAction::MoveDown)
@@ -291,7 +293,7 @@ mod tests {
         // …and the picker gained C-j.
         assert_eq!(
             eggplant_core::editing::lookup(
-                &app.layer_keys.picker,
+                &app.input.layer_keys.picker,
                 &key(KeyCode::Char('j'), KeyModifiers::CONTROL)
             ),
             Some(PickerAction::MoveDown)
@@ -325,7 +327,7 @@ mod tests {
                     eggplant_core::input::KeyCode::Char(';'),
                     eggplant_core::input::KeyModifiers::NONE
                 ),
-                &app.keymaps
+                &app.input.keymaps
             ),
             eggplant_core::editing::Resolved::Ignored
         );

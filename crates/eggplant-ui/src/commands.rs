@@ -19,7 +19,6 @@ use crate::layers::notification::Notification;
 use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
 use crate::layers::{grep, palette};
-use crate::theme::Theme;
 use eggplant_core::editing::EditorAction;
 pub use eggplant_core::input::KeyStroke;
 
@@ -325,7 +324,7 @@ pub fn default_registry() -> Registry {
             "Open the command palette",
             |app, compositor| {
                 compositor.push(Box::new(palette::command_palette(
-                    app.registry.commands().to_vec(),
+                    app.input.registry.commands().to_vec(),
                 )));
             },
         ),
@@ -364,9 +363,9 @@ pub fn default_registry() -> Registry {
             |_, compositor| compositor.push(Box::new(WhichKey::root())),
         ),
         Command::app("theme.cycle", "Cycle to the next color theme", |app, _| {
-            app.theme = Theme::next_after(app.theme.name);
+            let name = app.theme.cycle();
             app.notifications
-                .push(Notification::info(format!("theme: {}", app.theme.name)));
+                .push(Notification::info(format!("theme: {name}")));
         }),
         Command::app(
             "demo.dialog",
@@ -468,7 +467,7 @@ fn toggle_demo_dialog(_: &mut App, compositor: &mut Compositor) {
 fn demo_notification(app: &mut App, _: &mut Compositor) {
     app.notifications.push(Notification::info(format!(
         "notification (tick #{})",
-        app.tick_count
+        app.theme.ticks()
     )));
 }
 

@@ -1,4 +1,13 @@
 //! Shared application state.
+//!
+//! `App` is a *composition of cohesive slices*, not a flat bag: each
+//! slice owns its data and behavior (`ThemeState` the probe cadence,
+//! `InputState` the key-resolution pipeline, `Notifications` the toast
+//! queue, `Workspace` the project scope). `App` itself holds only the
+//! composition, the lifecycle, and cross-slice selectors. Layers receive
+//! `App` uniformly (heterogeneous dispatch), but touch only their slice —
+//! and express cross-slice writes as intents (see `layers::picker::Select`)
+//! rather than reaching across.
 
 use eggplant_core::Editor;
 
@@ -36,32 +45,100 @@ pub struct Leap {
     pub labels: Vec<LeapLabel>,
 }
 
-pub struct App {
-    pub editor: Editor,
-    pub notifications: Notifications,
+/// Theme state: the active theme, which source it follows (fixed vs. live
+/// ghostty switch), and the re-probe cadence. Owns the probe timing so the
+/// runner just asks "is a probe due?" / "did the theme flip?".
+pub struct ThemeState {
+    /// The active color theme (components read it via props adapters).
+    pub current: Theme,
+    follow: crate::theme::resolve::Follow,
+    /// Event-loop ticks (250ms each) since startup; drives the probe
+    /// cadence.
+    ticks: u32,
+}
+
+impl ThemeState {
+    /// A probe every ~3s (250ms ticks) — cheap (one OSC 11 round-trip),
+    /// catches a theme flip shortly after it happens.
+    const PROBE_EVERY_TICKS: u32 = 12;
+
+    pub fn new(theme: Theme, follow: crate::theme::resolve::Follow) -> Self {
+        Self {
+            current: theme,
+            follow,
+            ticks: 0,
+        }
+    }
+
+    /// Record one event-loop tick; `true` when a theme probe is due.
+    pub fn tick(&mut self) -> bool {
+        self.ticks = self.ticks.wrapping_add(1);
+        self.ticks.is_multiple_of(Self::PROBE_EVERY_TICKS)
+    }
+
+    /// Raw tick count (the demo notification shows it).
+    pub fn ticks(&self) -> u32 {
+        self.ticks
+    }
+
+    /// Re-derive the theme if the terminal flipped light/dark; `true` when
+    /// the active theme changed.
+    pub fn refresh(&mut self, probe: &mut impl crate::theme::probe::DarknessProbe) -> bool {
+        match crate::theme::resolve::refresh(&mut self.follow, probe) {
+            Some(theme) => {
+                self.current = theme;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Cycle to the next builtin theme; returns the new theme's name.
+    pub fn cycle(&mut self) -> &'static str {
+        self.current = Theme::next_after(self.current.name);
+        self.current.name
+    }
+}
+
+/// The key-resolution pipeline: the global command registry, the modal
+/// keymaps, the layer-local keymaps (config, compiled at startup), plus
+/// the transient pending modal input (counts, armed operators).
+pub struct InputState {
     /// The command registry: global keymap + palette contents.
     pub registry: Registry,
-    /// Active color theme (components read it via props adapters).
-    pub theme: Theme,
-    /// Which source the theme follows (fixed vs. live ghostty switch).
-    pub theme_follow: crate::theme::resolve::Follow,
-    /// Line fitting: soft-wrap when true, horizontal scroll when false
-    /// (see docs/design/line-fitting.md). Toggled by `Space u w`.
-    pub wrap: bool,
-    /// Pending modal input (counts, armed operators) — the statusline's
-    /// showcmd-style hint reads it; `editing::resolve` mutates it.
-    pub pending: PendingState,
     /// Modal keymaps (compiled defaults + config overrides).
     pub keymaps: Keymaps,
     /// Layer-local keymaps (explorer, picker, prompt, dialog, leap).
     pub layer_keys: crate::keymaps::LayerKeymaps,
+    /// Pending modal input — the statusline's showcmd-style hint reads
+    /// it; `editing::resolve` mutates it.
+    pub pending: PendingState,
+}
+
+impl InputState {
+    /// The pending-input hint for the statusline (vim `showcmd` style).
+    pub fn pending_hint(&self) -> Option<String> {
+        self.pending.hint()
+    }
+}
+
+pub struct App {
+    /// Editing state: the core facade (buffers, cursor, modes, history).
+    pub editor: Editor,
     /// The workspace: root + ignore rules (file picker/explorer scope).
     pub workspace: Workspace,
+    /// Toast queue.
+    pub notifications: Notifications,
+    /// Theme slice: active theme + follow source + probe cadence.
+    pub theme: ThemeState,
+    /// Input slice: keymaps + pending modal input.
+    pub input: InputState,
+    /// Line fitting: soft-wrap when true, horizontal scroll when false
+    /// (see docs/design/line-fitting.md). Toggled by `Space u w`.
+    pub wrap: bool,
     /// Leap-jump in progress (Space g c).
     pub leap: Option<Leap>,
     lifecycle: Lifecycle,
-    /// Event-loop ticks (250ms each): drives the theme re-probe cadence.
-    pub tick_count: u32,
 }
 
 impl App {
@@ -86,24 +163,24 @@ impl App {
     pub fn new(editor: Editor) -> Self {
         Self {
             editor,
-            notifications: Notifications::new(),
-            registry: commands::default_registry(),
-            theme: Theme::default(),
-            theme_follow: crate::theme::resolve::Follow::Fixed,
-            wrap: false,
-            lifecycle: Lifecycle::Running,
-            pending: PendingState::default(),
-            keymaps: Keymaps::default(),
-            layer_keys: crate::keymaps::LayerKeymaps::default(),
             workspace: Workspace::new(std::env::current_dir().unwrap_or_default()),
+            notifications: Notifications::new(),
+            theme: ThemeState::new(Theme::default(), crate::theme::resolve::Follow::Fixed),
+            input: InputState {
+                registry: commands::default_registry(),
+                keymaps: Keymaps::default(),
+                layer_keys: crate::keymaps::LayerKeymaps::default(),
+                pending: PendingState::default(),
+            },
+            wrap: false,
             leap: None,
-            tick_count: 0,
+            lifecycle: Lifecycle::Running,
         }
     }
 
     /// The pending-input hint for the statusline (vim `showcmd` style).
     pub fn pending_hint(&self) -> Option<String> {
-        self.pending.hint()
+        self.input.pending_hint()
     }
 
     /// Request application shutdown (the event loop observes and exits).
@@ -137,19 +214,35 @@ mod tests {
 
         use eggplant_core::editing::PendingKey;
 
-        app.pending.count = Some(5);
+        app.input.pending.count = Some(5);
         assert_eq!(app.pending_hint().as_deref(), Some("5"));
 
-        app.pending.key = Some((PendingKey::Delete, 1));
-        app.pending.count = None;
+        app.input.pending.key = Some((PendingKey::Delete, 1));
+        app.input.pending.count = None;
         assert_eq!(app.pending_hint().as_deref(), Some("d"));
 
-        app.pending.key = Some((PendingKey::Delete, 2));
+        app.input.pending.key = Some((PendingKey::Delete, 2));
         assert_eq!(app.pending_hint().as_deref(), Some("d2"));
 
         // Digits typed after the operator append: `d` then `3`.
-        app.pending.key = Some((PendingKey::Yank, 1));
-        app.pending.count = Some(3);
+        app.input.pending.key = Some((PendingKey::Yank, 1));
+        app.input.pending.count = Some(3);
         assert_eq!(app.pending_hint().as_deref(), Some("y3"));
+    }
+
+    #[test]
+    fn theme_probe_cadence_fires_every_twelve_ticks() {
+        let mut theme = ThemeState::new(Theme::default(), crate::theme::resolve::Follow::Fixed);
+        let dues: Vec<bool> = (0..25).map(|_| theme.tick()).collect();
+        assert_eq!(theme.ticks(), 25);
+        assert_eq!(
+            dues.iter()
+                .enumerate()
+                .filter(|(_, due)| **due)
+                .map(|(i, _)| i)
+                .collect::<Vec<_>>(),
+            vec![11, 23],
+            "probe due on the 12th and 24th tick"
+        );
     }
 }

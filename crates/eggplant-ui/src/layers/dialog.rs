@@ -26,7 +26,7 @@ impl Dialog {
 
 impl Layer for Dialog {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
-        dialog::dialog_view(&self.title, &self.body, area, &app.theme)
+        dialog::dialog_view(&self.title, &self.body, area, &app.theme.current)
     }
 
     fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {
@@ -104,11 +104,11 @@ impl ConfirmDialog {
 
 impl Layer for ConfirmDialog {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
-        dialog::confirm_view(&self.title, &self.message, area, &app.theme)
+        dialog::confirm_view(&self.title, &self.message, area, &app.theme.current)
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        match eggplant_core::editing::lookup(&app.layer_keys.dialog, &key) {
+        match eggplant_core::editing::lookup(&app.input.layer_keys.dialog, &key) {
             Some(DialogAction::Confirm) => {
                 if let Some(on_confirm) = self.on_confirm.take() {
                     on_confirm(app);

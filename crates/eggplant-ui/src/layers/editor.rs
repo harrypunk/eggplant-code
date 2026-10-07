@@ -92,7 +92,7 @@ impl EditorSurface {
 impl Layer for EditorSurface {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         if !app.editor.has_buffer() {
-            return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme);
+            return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme.current);
         }
         let width = self.text_width(app);
         let line_count = app.editor.display_line_count();
@@ -133,7 +133,7 @@ impl Layer for EditorSurface {
                 dim: app.dims_editor_text(),
             },
             area,
-            &app.theme,
+            &app.theme.current,
         )
     }
 
@@ -143,8 +143,12 @@ impl Layer for EditorSurface {
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        let result = match editing::resolve(&mut app.pending, app.editor.mode(), key, &app.keymaps)
-        {
+        let result = match editing::resolve(
+            &mut app.input.pending,
+            app.editor.mode(),
+            key,
+            &app.input.keymaps,
+        ) {
             Resolved::Swallowed => KeyResult::Consumed,
             Resolved::Ignored => KeyResult::Ignored,
             // Viewport intents belong to this layer (the scroll owner).

@@ -41,7 +41,7 @@ impl Layer for WhichKey {
             .chain(self.path.iter().map(char::to_string))
             .collect::<Vec<_>>()
             .join(" ");
-        which_key::view(&WhichKeyProps { path, hints }, area, &app.theme)
+        which_key::view(&WhichKeyProps { path, hints }, area, &app.theme.current)
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
@@ -54,7 +54,7 @@ impl Layer for WhichKey {
             };
         };
         match self.node.iter().find(|node| node.key() == c) {
-            Some(KeyNode::Leaf { command, .. }) => match app.registry.by_id(command) {
+            Some(KeyNode::Leaf { command, .. }) => match app.input.registry.by_id(command) {
                 Some(command) => KeyResult::Execute(command),
                 None => KeyResult::Close,
             },

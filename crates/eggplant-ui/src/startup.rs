@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use eggplant_core::Editor;
 
-use crate::app::App;
+use crate::app::{App, ThemeState};
 use crate::compositor::Compositor;
 use crate::config::Config;
 use crate::layers::editor::EditorSurface;
@@ -99,8 +99,7 @@ fn resolve_theme(explicit: Option<&str>, app: &mut App) {
         crate::theme::resolve::inside_ghostty(),
         &mut probe,
     );
-    app.theme = resolution.theme;
-    app.theme_follow = resolution.follow;
+    app.theme = ThemeState::new(resolution.theme, resolution.follow);
     for warning in resolution.warnings {
         app.notifications
             .push(Notification::warn(format!("theme: {warning}")));
