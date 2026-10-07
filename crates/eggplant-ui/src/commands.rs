@@ -246,7 +246,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
             },
             KeyNode::Leaf {
                 key: 'q',
-                description: "save & quit",
+                description: "save+quit",
                 command: "file.save-quit",
             },
             KeyNode::Leaf {
@@ -256,7 +256,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
             },
             KeyNode::Leaf {
                 key: 'p',
-                description: "picker",
+                description: "open",
                 command: "file.open-picker",
             },
         ],
@@ -287,7 +287,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
         description: "+goto",
         children: &[KeyNode::Leaf {
             key: 'c',
-            description: "char (2-char leap)",
+            description: "leap",
             command: "goto.char",
         }],
     },
@@ -297,17 +297,17 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
         children: &[
             KeyNode::Leaf {
                 key: 'b',
-                description: "in buffer",
+                description: "buffer",
                 command: "search.buffer",
             },
             KeyNode::Leaf {
                 key: 'c',
-                description: "grep lines",
+                description: "lines",
                 command: "search.lines",
             },
             KeyNode::Leaf {
                 key: 'p',
-                description: "in project (live)",
+                description: "project",
                 command: "search.project",
             },
         ],
@@ -317,7 +317,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
         description: "+ui",
         children: &[KeyNode::Leaf {
             key: 'w',
-            description: "toggle wrap",
+            description: "wrap",
             command: "ui.toggle-wrap",
         }],
     },
@@ -328,12 +328,12 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
     },
     KeyNode::Leaf {
         key: 't',
-        description: "cycle theme",
+        description: "theme",
         command: "theme.cycle",
     },
     KeyNode::Leaf {
         key: 'p',
-        description: "command palette",
+        description: "palette",
         command: "palette.open",
     },
 ];

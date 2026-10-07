@@ -78,26 +78,28 @@ an existing binding. `◌` = designed, not yet implemented.
 Space
 ├── f +file
 │   ├── s save
-│   ├── q save & quit
+│   ├── q save+quit
 │   ├── e explorer
-│   └── p picker           — fuzzy over workspace files
+│   └── p open             — fuzzy over workspace files
 ├── b +buffer
 │   ├── n next
 │   ├── p prev
 │   └── d close
 ├── s +search
-│   ├── b in buffer        — live /-style search, n/N cycle
-│   ├── c grep lines       — live picker over buffer lines
-│   └── p in project       — workspace live-grep with preview pane
+│   ├── b buffer           — live /-style search, n/N cycle
+│   ├── c lines            — live picker over buffer lines
+│   └── p project          — workspace live-grep with preview pane
 ├── g +goto
-│   ├── c char             — 2-char leap jump
+│   ├── c leap             — 2-char jump to any match
 │   ├── d definition  ◌    — LSP (fast path: `g d`)
 │   └── r references  ◌    — LSP (fast path: `g r`)
 ├── w +window  ◌           — focus/split management (beyond C-h/C-l)
 ├── l +lsp  ◌              — hover, rename, code actions, diagnostics
 ├── a +ai  ◌               — agent chat, inline edit, …
-├── p command palette
-├── t cycle theme
+├── u +ui
+│   └── w wrap             — soft-wrap ↔ horizontal scroll
+├── p palette
+├── t theme
 └── q quit
 ```
 
