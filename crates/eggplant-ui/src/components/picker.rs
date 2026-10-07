@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Direction, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::components::preview::PreviewProps;
 use crate::element::Element;
 use crate::theme::Theme;
 
@@ -17,20 +18,28 @@ pub struct PickerItem {
 }
 
 /// Everything the picker needs — nothing more.
-pub struct PickerProps {
+pub struct PickerProps<'a> {
     /// Frame title ("palette", "grep", …).
     pub title: &'static str,
     pub input: String,
     pub items: Vec<PickerItem>,
     pub selected: usize,
+    /// Materialized preview of the selected item (project grep); the
+    /// float widens and splits when present.
+    pub preview: Option<&'a PreviewProps>,
 }
 
 /// Display cap; the container pre-filters, this caps the rendered rows.
 pub const MAX_ROWS: u16 = 8;
 
 pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
-    // Centered horizontally, hugging the top of the body area.
-    let width = (area.width * 3 / 5).max(30).min(area.width);
+    // Centered horizontally, hugging the top of the body area. A preview
+    // pane needs room: widen to 4/5 and split list | preview.
+    let width = if props.preview.is_some() {
+        (area.width * 4 / 5).max(50).min(area.width)
+    } else {
+        (area.width * 3 / 5).max(30).min(area.width)
+    };
     let height = (MAX_ROWS + 3).min(area.height); // input + rows + borders
     let frame_area = Rect {
         x: area.x + (area.width - width) / 2,
@@ -81,10 +90,26 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
                 title: Some(Line::from(format!(" {} ", props.title))),
                 border_style: Style::default().fg(theme.accent),
                 style: Style::default().fg(theme.fg).bg(theme.surface),
-                child: Box::new(Element::Layout {
-                    direction: Direction::Vertical,
-                    constraints: vec![Constraint::Length(1), Constraint::Min(1)],
-                    children: vec![Element::text(vec![input_row]), Element::text(rows)],
+                child: Box::new({
+                    let list = Element::Layout {
+                        direction: Direction::Vertical,
+                        constraints: vec![Constraint::Length(1), Constraint::Min(1)],
+                        children: vec![Element::text(vec![input_row]), Element::text(rows)],
+                    };
+                    match props.preview {
+                        Some(preview) => Element::Layout {
+                            direction: Direction::Horizontal,
+                            constraints: vec![
+                                Constraint::Percentage(40),
+                                Constraint::Percentage(60),
+                            ],
+                            children: vec![
+                                list,
+                                crate::components::preview::view(preview, area, theme),
+                            ],
+                        },
+                        None => list,
+                    }
                 }),
             },
             Element::cursor(cursor_x, frame_area.y + 1),
@@ -110,6 +135,7 @@ mod tests {
                 secondary: "Quit".to_owned(),
             }],
             selected: 0,
+            preview: None,
         };
         let backend = TestBackend::new(60, 12);
         let mut terminal = Terminal::new(backend).unwrap();

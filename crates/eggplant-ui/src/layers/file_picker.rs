@@ -5,7 +5,7 @@ use crate::compositor::KeyResult;
 use crate::files::FileEntry;
 use crate::layers::notification::Notification;
 
-use super::picker::{Picker, PickerSpec};
+use super::picker::{Picker, PickerSource, PickerSpec};
 
 /// Pathological-tree guard: plenty for real projects, bounded for `/`.
 const FILE_CAP: usize = 20_000;
@@ -14,8 +14,10 @@ const FILE_CAP: usize = 20_000;
 pub fn file_picker(app: &App) -> Picker<FileEntry> {
     Picker::new(PickerSpec {
         title: "open",
-        items: app.workspace.collect_files(FILE_CAP),
-        text_of: |file| &file.rel,
+        source: PickerSource::List {
+            items: app.workspace.collect_files(FILE_CAP),
+            text_of: |file| &file.rel,
+        },
         project: |file| {
             let name = file
                 .abs
@@ -32,5 +34,6 @@ pub fn file_picker(app: &App) -> Picker<FileEntry> {
             // Opening a file moves the cursor: focus follows (CloseUnfocus).
             KeyResult::CloseUnfocus
         },
+        preview_of: None,
     })
 }

@@ -1,7 +1,13 @@
 //! The generic picker container: owns the input and selection, derives the
-//! filtered list (selector), delegates rendering to the pure
-//! `components::picker` view. Concrete pickers (command palette, buffer
-//! grep, …) are constructor functions over `PickerSpec`.
+//! visible item list, delegates rendering to the pure `components::picker`
+//! view. Concrete pickers (command palette, buffer grep, project grep, …)
+//! are constructor functions over `PickerSpec`.
+//!
+//! Two seams make it generic (docs/design/live-grep.md):
+//! - `PickerSource`: static list + fuzzy filter, or a live query that
+//!   re-derives items on every input change.
+//! - `preview_of`: materializes the selected item's preview at event time
+//!   (Rule 5: I/O here, never in the view).
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
@@ -9,6 +15,7 @@ use ratatui::layout::Rect;
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::components::picker::{self, PickerItem, PickerProps};
+use crate::components::preview::PreviewProps;
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
 use crate::fuzzy;
@@ -57,54 +64,108 @@ pub const DEFAULT_KEYS: &[(KeyStroke, PickerAction)] = &[
     ),
 ];
 
-/// What makes a picker concrete: its items plus three function pointers —
-/// how to filter, how to display, what Enter does.
+/// Where a picker's items come from.
+pub enum PickerSource<T> {
+    /// Static items, fuzzy-filtered by the input (palette, buffer grep,
+    /// file picker).
+    List {
+        items: Vec<T>,
+        /// Text the fuzzy filter matches against.
+        text_of: fn(&T) -> &str,
+    },
+    /// Live derivation: the input re-runs the query on every change
+    /// (project grep). The query result is the item list — no fuzzy on
+    /// top.
+    Query { run: fn(&str, &App) -> Vec<T> },
+}
+
+/// What makes a picker concrete: its item source plus function pointers —
+/// how to display, what Enter does, optionally how to preview.
 pub struct PickerSpec<T> {
     /// Frame title ("palette", "grep", …).
     pub title: &'static str,
-    pub items: Vec<T>,
-    /// Text the fuzzy filter matches against.
-    pub text_of: fn(&T) -> &str,
+    pub source: PickerSource<T>,
     /// Display projection: (primary column, free-form text).
     pub project: fn(&T) -> (String, String),
     /// Enter on an item.
     pub on_select: fn(&T, &mut App) -> KeyResult,
+    /// Materialize the selected item's preview (runs at event time).
+    pub preview_of: Option<fn(&T, &App) -> PreviewProps>,
 }
 
 pub struct Picker<T> {
     input: String,
     selected: usize,
+    /// Materialized items: the whole list for `List`, the last query
+    /// result for `Query`.
+    items: Vec<T>,
+    preview: Option<PreviewProps>,
     spec: PickerSpec<T>,
 }
 
 impl<T> Picker<T> {
     pub fn new(spec: PickerSpec<T>) -> Self {
-        Self {
+        let items = match &spec.source {
+            PickerSource::List { .. } => Vec::new(),  // moved out below
+            PickerSource::Query { .. } => Vec::new(), // queries start empty
+        };
+        let mut picker = Self {
             input: String::new(),
             selected: 0,
+            items,
+            preview: None,
             spec,
+        };
+        if let PickerSource::List { items, .. } = &mut picker.spec.source {
+            picker.items = std::mem::take(items);
         }
+        picker
     }
 
-    /// Selector: items matching the current input, best first, capped.
+    /// The visible items: fuzzy-filtered for `List`, as-queried for
+    /// `Query` (selector — derived, never cached).
     fn filtered(&self) -> Vec<&T> {
-        fuzzy::filter(&self.input, &self.spec.items, self.spec.text_of)
-            .into_iter()
-            .take(picker::MAX_ROWS as usize)
-            .map(|(_, item)| item)
-            .collect()
+        match &self.spec.source {
+            PickerSource::List { text_of, .. } => {
+                fuzzy::filter(&self.input, &self.items, |item| text_of(item))
+                    .into_iter()
+                    .map(|(_, item)| item)
+                    .collect()
+            }
+            PickerSource::Query { .. } => self.items.iter().collect(),
+        }
     }
 
-    fn move_selection(&mut self, delta: isize) {
-        let count = self.filtered().len();
-        if count == 0 {
-            return;
+    fn move_selection(&mut self, delta: i32, app: &App) {
+        let len = self.filtered().len();
+        if len > 0 {
+            self.selected = (self.selected as i32 + delta).rem_euclid(len as i32) as usize;
         }
-        self.selected = self.selected.saturating_add_signed(delta).min(count - 1);
+        self.refresh_preview(app);
+    }
+
+    /// The input changed: re-derive (query sources), reset the selection,
+    /// re-materialize the preview.
+    fn input_changed(&mut self, app: &App) {
+        if let PickerSource::Query { run } = &self.spec.source {
+            self.items = run(&self.input, app);
+        }
+        self.selected = 0;
+        self.refresh_preview(app);
+    }
+
+    /// Preview is state: materialized here (event time), painted by the
+    /// view (pure).
+    fn refresh_preview(&mut self, app: &App) {
+        self.preview = self.spec.preview_of.and_then(|preview_of| {
+            self.filtered()
+                .get(self.selected)
+                .map(|item| preview_of(item, app))
+        });
     }
 }
 
-impl<T: 'static> Layer for Picker<T> {
+impl<T> Layer for Picker<T> {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         let items = self
             .filtered()
@@ -120,6 +181,7 @@ impl<T: 'static> Layer for Picker<T> {
                 input: self.input.clone(),
                 items,
                 selected: self.selected,
+                preview: self.preview.as_ref(),
             },
             area,
             &app.theme,
@@ -135,11 +197,11 @@ impl<T: 'static> Layer for Picker<T> {
                 },
                 PickerAction::Close => KeyResult::Close,
                 PickerAction::MoveUp => {
-                    self.move_selection(-1);
+                    self.move_selection(-1, app);
                     KeyResult::Consumed
                 }
                 PickerAction::MoveDown => {
-                    self.move_selection(1);
+                    self.move_selection(1, app);
                     KeyResult::Consumed
                 }
             };
@@ -148,14 +210,14 @@ impl<T: 'static> Layer for Picker<T> {
         match key.code {
             KeyCode::Backspace => {
                 self.input.pop();
-                self.selected = 0;
+                self.input_changed(app);
                 KeyResult::Consumed
             }
             KeyCode::Char(c)
                 if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) =>
             {
                 self.input.push(c);
-                self.selected = 0;
+                self.input_changed(app);
                 KeyResult::Consumed
             }
             _ => KeyResult::Consumed, // modal-ish
@@ -167,6 +229,88 @@ impl<T: 'static> Layer for Picker<T> {
     }
 
     fn id(&self) -> &'static str {
-        self.spec.title
+        "picker"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Item(String);
+    fn spec(source: PickerSource<Item>) -> PickerSpec<Item> {
+        PickerSpec {
+            title: "test",
+            source,
+            project: |item| (item.0.clone(), String::new()),
+            on_select: |_, _| KeyResult::Close,
+            preview_of: None,
+        }
+    }
+
+    fn app() -> App {
+        App::new(eggplant_core::Editor::scratch().unwrap())
+    }
+
+    fn char_key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn list_source_fuzzy_filters() {
+        let mut picker = Picker::new(spec(PickerSource::List {
+            items: vec![Item("alpha".into()), Item("beta".into())],
+            text_of: |item| &item.0,
+        }));
+        let mut app = app();
+        picker.handle_key(char_key('b'), &mut app);
+        assert_eq!(picker.filtered().len(), 1);
+        assert_eq!(picker.filtered()[0].0, "beta");
+    }
+
+    #[test]
+    fn query_source_re_runs_on_input_change() {
+        let run = |input: &str, _: &App| -> Vec<Item> {
+            (0..input.len()).map(|i| Item(format!("hit{i}"))).collect()
+        };
+        let mut picker = Picker::new(spec(PickerSource::Query { run }));
+        let mut app = app();
+        assert_eq!(picker.filtered().len(), 0, "queries start empty");
+        picker.handle_key(char_key('a'), &mut app);
+        assert_eq!(picker.filtered().len(), 1);
+        picker.handle_key(char_key('b'), &mut app);
+        assert_eq!(picker.filtered().len(), 2);
+        picker.handle_key(
+            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            &mut app,
+        );
+        assert_eq!(picker.filtered().len(), 1, "backspace re-queries too");
+        assert_eq!(picker.selected, 0, "selection resets on input change");
+    }
+
+    #[test]
+    fn preview_materializes_on_selection_and_input() {
+        let run = |_: &str, _: &App| -> Vec<Item> { vec![Item("one".into()), Item("two".into())] };
+        let preview_of = |item: &Item, _: &App| -> PreviewProps {
+            PreviewProps {
+                title: item.0.clone(),
+                first_line: 0,
+                lines: vec![item.0.clone()],
+                focus_row: 0,
+                focus_cols: (0, 1),
+            }
+        };
+        let mut picker = Picker::new(PickerSpec {
+            preview_of: Some(preview_of),
+            ..spec(PickerSource::Query { run })
+        });
+        let mut app = app();
+        assert!(picker.preview.is_none(), "no preview before any item");
+        picker.handle_key(char_key('x'), &mut app);
+        assert_eq!(picker.preview.as_ref().unwrap().title, "one");
+        picker.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &mut app);
+        assert_eq!(picker.preview.as_ref().unwrap().title, "two");
+        picker.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &mut app);
+        assert_eq!(picker.preview.as_ref().unwrap().title, "one");
     }
 }
