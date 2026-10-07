@@ -171,10 +171,13 @@ eggplant-code/
 ├── docs/design/          # subsystem design docs (theme.md, …)
 └── crates/
     ├── eggplant/         # binary: event loop + wiring (package: eggplant-code)
-    ├── eggplant-ui/      # compositor, layers, components, editing pipeline,
-    │                     # keymaps (all data), theme/, filetree, workspace,
-    │                     # viewport (ratatui)
-    ├── eggplant-core/    # editor backend facade (v1 wraps helix-core)
+    ├── eggplant-ui/      # terminal SHELL: app state, commands/registry,
+    │                     # config, theme, compositor/element/components/
+    │                     # layers, runner (crossterm → core translation)
+    ├── eggplant-core/    # headless ENGINE (no terminal deps): helix facade,
+    │                     # input vocabulary, editing pipeline (resolve/
+    │                     # interpret/keymaps), viewport, files/filetree,
+    │                     # grep, fuzzy — docs/design/architecture.md
     └── eggplant-agent/   # native Rust AI agent (placeholder, lands in M4)
 ```
 
