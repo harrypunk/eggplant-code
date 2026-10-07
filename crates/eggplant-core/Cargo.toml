@@ -11,3 +11,4 @@ helix-loader.workspace = true
 arc-swap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
+ignore.workspace = true

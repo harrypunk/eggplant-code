@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use regex::Regex;
 
 use crate::components::preview::PreviewProps;
-use crate::files::Workspace;
+use eggplant_core::files::Workspace;
 
 /// Don't search below this pattern length (like leap's 2 chars).
 pub const MIN_PATTERN: usize = 2;

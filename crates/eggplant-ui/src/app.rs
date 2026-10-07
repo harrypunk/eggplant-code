@@ -3,10 +3,10 @@
 use eggplant_core::Editor;
 
 use crate::commands::{self, Registry};
-use crate::files::Workspace;
 use crate::layers::notification::{Notification, Notifications};
 use crate::theme::Theme;
 use eggplant_core::editing::{EditorCtx, Keymaps, PendingState};
+use eggplant_core::files::Workspace;
 
 /// Application lifecycle status. Not a `bool`: quitting is a state
 /// transition, and this is where future states land (e.g. quit reasons,

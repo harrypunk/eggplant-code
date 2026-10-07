@@ -2,8 +2,8 @@
 
 use crate::app::App;
 use crate::compositor::KeyResult;
-use crate::files::FileEntry;
 use crate::layers::notification::Notification;
+use eggplant_core::files::FileEntry;
 
 use super::picker::{Picker, PickerSource, PickerSpec};
 

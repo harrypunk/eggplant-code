@@ -610,6 +610,7 @@ dependencies = [
  "helix-core",
  "helix-loader",
  "helix-view",
+ "ignore",
  "tokio",
 ]
 
@@ -619,7 +620,6 @@ version = "0.1.0"
 dependencies = [
  "crossterm 0.29.0",
  "eggplant-core",
- "ignore",
  "ratatui",
  "regex",
  "serde",

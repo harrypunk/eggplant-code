@@ -12,8 +12,6 @@ pub mod components;
 pub mod compositor;
 pub mod config;
 pub mod element;
-pub mod files;
-pub mod filetree;
 pub mod fuzzy;
 pub mod keymaps;
 pub mod layers;

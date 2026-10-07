@@ -22,8 +22,8 @@ use crate::commands::KeyStroke;
 use crate::components::files_panel::{self, FilesPanelProps, RowKind, RowProps};
 use crate::compositor::{KeyResult, Layer, LayerKind, Side};
 use crate::element::Element;
-use crate::filetree::{FileTree, TreeRow, fs_lister};
 use crate::layers::notification::Notification;
+use eggplant_core::filetree::{FileTree, TreeRow, fs_lister};
 
 pub const PANEL_ID: &str = "files";
 const WIDTH: u16 = 32;
@@ -406,7 +406,7 @@ mod tests {
         let names = |panel: &FilesPanel, app: &App| -> Vec<String> {
             panel.rows(app).iter().map(|r| r.name.clone()).collect()
         };
-        app.workspace = crate::files::Workspace::new(root.clone());
+        app.workspace = eggplant_core::files::Workspace::new(root.clone());
 
         // filtered: no target/, no dotfiles
         assert_eq!(names(&panel, &app), ["a_dir", "z_dir", "b.txt"]);

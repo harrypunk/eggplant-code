@@ -7,6 +7,8 @@
 
 pub mod editing;
 pub mod editor;
+pub mod files;
+pub mod filetree;
 pub mod highlight;
 pub mod input;
 pub mod mode;
