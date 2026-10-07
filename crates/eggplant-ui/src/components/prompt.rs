@@ -15,30 +15,22 @@ pub struct PromptProps {
 }
 
 pub fn view(props: &PromptProps, area: Rect, theme: &Theme) -> Element {
-    let row = Rect {
-        x: area.x,
-        y: area.bottom().saturating_sub(1),
-        width: area.width,
-        height: 1,
-    };
+    let _ = area;
     let base = Style::default().fg(theme.fg).bg(theme.surface);
-    let line = Line::from(vec![
-        Span::styled(
-            props.label,
-            Style::default().fg(theme.accent).bg(theme.surface),
-        ),
-        Span::styled(props.input.clone(), base),
-    ]);
-    let cursor_x = row.x + props.label.len() as u16 + props.input.chars().count() as u16;
-    Element::Fixed {
-        area: row,
-        child: Box::new(Element::Stack(vec![
-            Element::Text {
-                lines: vec![line],
+    // Bottom row, declaratively: spacer takes everything above it.
+    Element::Layout {
+        direction: ratatui::layout::Direction::Vertical,
+        constraints: vec![
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(1),
+        ],
+        children: vec![
+            Element::Empty,
+            Element::cleared(Element::Input {
+                prompt: Line::from(Span::styled(props.label, Style::default().fg(theme.accent))),
+                text: props.input.clone(),
                 style: base,
-                wrap: false,
-            },
-            Element::cursor(cursor_x, row.y),
-        ])),
+            }),
+        ],
     }
 }

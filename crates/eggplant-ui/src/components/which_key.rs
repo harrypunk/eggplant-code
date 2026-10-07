@@ -21,13 +21,7 @@ pub struct WhichKeyProps {
     pub hints: Vec<KeyHint>,
 }
 
-pub fn view(props: &WhichKeyProps, area: Rect, theme: &Theme) -> Element {
-    let bar_area = Rect {
-        height: 1,
-        y: area.bottom().saturating_sub(1),
-        ..area
-    };
-
+pub fn view(props: &WhichKeyProps, _area: Rect, theme: &Theme) -> Element {
     let key_style = Style::default()
         .fg(theme.accent)
         .add_modifier(Modifier::BOLD);
@@ -46,12 +40,20 @@ pub fn view(props: &WhichKeyProps, area: Rect, theme: &Theme) -> Element {
         ));
     }
 
-    Element::fixed(
-        bar_area,
-        Element::cleared(Element::Text {
-            lines: vec![Line::from(spans)],
-            style: Style::default().fg(theme.fg).bg(theme.surface),
-            wrap: false,
-        }),
-    )
+    // Bottom bar, declaratively: spacer above, one row of hints.
+    Element::Layout {
+        direction: ratatui::layout::Direction::Vertical,
+        constraints: vec![
+            ratatui::layout::Constraint::Min(0),
+            ratatui::layout::Constraint::Length(1),
+        ],
+        children: vec![
+            Element::Empty,
+            Element::cleared(Element::Text {
+                lines: vec![Line::from(spans)],
+                style: Style::default().fg(theme.fg).bg(theme.surface),
+                wrap: false,
+            }),
+        ],
+    }
 }

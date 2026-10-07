@@ -1,11 +1,17 @@
-//! The generic picker: input row + filtered item list, hugging the top.
-//! Commands palette, buffer grep, … are all pickers over different items.
+//! The generic picker: input row + filtered item list, hugging the top;
+//! with a preview, a taller split panel (list │ preview). Commands
+//! palette, buffer grep, project grep, … are all pickers over different
+//! items.
+//!
+//! Layout is fully declarative: percentage spacers center/size the panel
+//! (cassowary does the math — no computed rects), the cursor rides along
+//! with `Element::Input`.
 
 use ratatui::layout::{Constraint, Direction, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::components::preview::PreviewProps;
+use crate::components::preview::{self, PreviewProps};
 use crate::element::Element;
 use crate::theme::Theme;
 
@@ -25,36 +31,44 @@ pub struct PickerProps<'a> {
     pub items: Vec<PickerItem>,
     pub selected: usize,
     /// Materialized preview of the selected item (project grep); the
-    /// float widens and splits when present.
+    /// panel becomes a taller split when present.
     pub preview: Option<&'a PreviewProps>,
 }
 
-/// Display cap; the container pre-filters, this caps the rendered rows.
+/// Rows shown in the compact (preview-less) float; with a preview the
+/// panel is a percentage of the screen instead.
 pub const MAX_ROWS: u16 = 8;
 
-pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
-    // Centered horizontally, hugging the top of the body area. A preview
-    // pane needs room: widen to 4/5 and split list | preview.
-    let width = if props.preview.is_some() {
-        (area.width * 4 / 5).max(50).min(area.width)
-    } else {
-        (area.width * 3 / 5).max(30).min(area.width)
-    };
-    let height = (MAX_ROWS + 3).min(area.height); // input + rows + borders
-    let frame_area = Rect {
-        x: area.x + (area.width - width) / 2,
-        y: area.y + 1,
-        width,
-        height,
-    };
+/// Center `panel` with percentage spacers (top-hugging) — the declarative
+/// replacement for computed frame rects.
+fn centered(panel: Element, horizontal: [u16; 3], vertical: Vec<Constraint>) -> Element {
+    let [left, middle, right] = horizontal;
+    Element::Layout {
+        direction: Direction::Vertical,
+        constraints: vertical,
+        children: vec![
+            Element::Empty,
+            Element::Layout {
+                direction: Direction::Horizontal,
+                constraints: vec![
+                    Constraint::Percentage(left),
+                    Constraint::Percentage(middle),
+                    Constraint::Percentage(right),
+                ],
+                children: vec![Element::Empty, panel, Element::Empty],
+            },
+            Element::Empty,
+        ],
+    }
+}
 
-    let input_row = Line::from(vec![
-        Span::styled("> ", Style::default().fg(theme.accent)),
-        Span::raw(props.input.clone()),
-    ]);
-    // Cursor after the input, clamped inside the border.
-    let cursor_x =
-        (frame_area.x + 3 + props.input.len() as u16).min(frame_area.right().saturating_sub(2));
+pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
+    let base = Style::default().fg(theme.fg).bg(theme.surface);
+    let input = Element::Input {
+        prompt: Line::from(Span::styled("> ", Style::default().fg(theme.accent))),
+        text: props.input.clone(),
+        style: base,
+    };
 
     let rows: Vec<Line> = props
         .items
@@ -83,38 +97,65 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
         })
         .collect();
 
-    Element::fixed(
-        frame_area,
-        Element::cleared(Element::Stack(vec![
-            Element::Bordered {
-                title: Some(Line::from(format!(" {} ", props.title))),
-                border_style: Style::default().fg(theme.accent),
-                style: Style::default().fg(theme.fg).bg(theme.surface),
-                child: Box::new({
-                    let list = Element::Layout {
-                        direction: Direction::Vertical,
-                        constraints: vec![Constraint::Length(1), Constraint::Min(1)],
-                        children: vec![Element::text(vec![input_row]), Element::text(rows)],
-                    };
-                    match props.preview {
-                        Some(preview) => Element::Layout {
-                            direction: Direction::Horizontal,
-                            constraints: vec![
-                                Constraint::Percentage(40),
-                                Constraint::Percentage(60),
-                            ],
-                            children: vec![
-                                list,
-                                crate::components::preview::view(preview, area, theme),
-                            ],
-                        },
-                        None => list,
-                    }
-                }),
+    let list = Element::Layout {
+        direction: Direction::Vertical,
+        constraints: vec![Constraint::Length(1), Constraint::Min(1)],
+        children: vec![
+            input,
+            Element::Text {
+                lines: rows,
+                style: base,
+                wrap: false,
             },
-            Element::cursor(cursor_x, frame_area.y + 1),
-        ])),
-    )
+        ],
+    };
+
+    // One panel: outer border, panes divided by a vertical rule.
+    let body = match props.preview {
+        Some(preview) => Element::Layout {
+            direction: Direction::Horizontal,
+            constraints: vec![
+                Constraint::Percentage(40),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ],
+            children: vec![
+                list,
+                Element::VRule(Style::default().fg(theme.comment)),
+                preview::view(preview, area, theme),
+            ],
+        },
+        None => list,
+    };
+
+    let panel = Element::cleared(Element::Bordered {
+        title: Some(Line::from(format!(" {} ", props.title))),
+        border_style: Style::default().fg(theme.accent),
+        style: base,
+        child: Box::new(body),
+    });
+
+    if props.preview.is_some() {
+        centered(
+            panel,
+            [10, 80, 10],
+            vec![
+                Constraint::Length(1),
+                Constraint::Percentage(55),
+                Constraint::Min(0),
+            ],
+        )
+    } else {
+        centered(
+            panel,
+            [20, 60, 20],
+            vec![
+                Constraint::Length(1),
+                Constraint::Length(MAX_ROWS + 3),
+                Constraint::Min(0),
+            ],
+        )
+    }
 }
 
 #[cfg(test)]
@@ -137,19 +178,57 @@ mod tests {
             selected: 0,
             preview: None,
         };
-        let backend = TestBackend::new(60, 12);
-        let mut terminal = Terminal::new(backend).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(60, 12)).unwrap();
         terminal
             .draw(|frame| {
                 let area = frame.area();
                 crate::element::paint(frame, view(&props, area, &theme), area);
             })
             .unwrap();
-        // Palette: width 36 centered in 60 → x=12; border → inner x=13.
-        // Row 0 is at y=3 (frame y=1, border, input row); the description
-        // starts after " {:<20}" → x=13+21=34.
-        let cell = &terminal.backend().buffer()[(34, 3)];
+        let buffer = terminal.backend().buffer();
+        let cell = buffer
+            .content
+            .iter()
+            .find(|cell| cell.symbol() == "Q")
+            .expect("description rendered");
         assert_eq!(cell.bg, theme.selection);
         assert_eq!(cell.fg, theme.fg);
+    }
+
+    #[test]
+    fn preview_splits_the_panel_with_a_divider() {
+        let theme = Theme::default();
+        let preview = PreviewProps {
+            title: "a.rs:1".to_owned(),
+            first_line: 0,
+            lines: vec!["hit".to_owned()],
+            focus_row: 0,
+            focus_cols: (0, 3),
+        };
+        let props = PickerProps {
+            title: "project grep",
+            input: "hit".to_owned(),
+            items: vec![PickerItem {
+                primary: "a.rs:1".to_owned(),
+                secondary: "hit".to_owned(),
+            }],
+            selected: 0,
+            preview: Some(&preview),
+        };
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::element::paint(frame, view(&props, area, &theme), area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(
+            buffer.content.iter().any(|cell| cell.symbol() == "│"),
+            "a divider separates list and preview"
+        );
+        // The preview title renders on the right side.
+        let text: String = buffer.content.iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("a.rs:1"), "preview title shown");
     }
 }

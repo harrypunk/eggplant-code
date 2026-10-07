@@ -20,8 +20,8 @@ pub const MAX_HITS: usize = 500;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// A NUL in the first this-many bytes marks a file as binary.
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
-/// Preview context lines above/below the hit.
-const PREVIEW_CONTEXT: usize = 3;
+/// Preview context lines above/below the hit (±5).
+const PREVIEW_CONTEXT: usize = 5;
 
 /// One match: where it is, and the line it sits on.
 #[derive(Debug, Clone)]

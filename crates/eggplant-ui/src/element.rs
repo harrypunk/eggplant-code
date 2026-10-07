@@ -47,6 +47,16 @@ pub enum Element {
     Stack(Vec<Element>),
     /// Place the terminal cursor (absolute position; last one painted wins).
     Cursor(Position),
+    /// A one-line text input: styled prompt + text, with the terminal
+    /// cursor placed after the text. The renderer knows the rect — views
+    /// never compute cursor coordinates.
+    Input {
+        prompt: Line<'static>,
+        text: String,
+        style: Style,
+    },
+    /// A vertical rule (│) filling its rect — a pane divider.
+    VRule(Style),
 }
 
 impl Element {
@@ -145,6 +155,30 @@ pub fn paint(frame: &mut Frame, element: Element, area: Rect) {
             }
         }
         Element::Cursor(position) => frame.set_cursor_position(position),
+        Element::Input {
+            prompt,
+            text,
+            style,
+        } => {
+            let text_width = text.chars().count() as u16;
+            let prompt_width = prompt.width() as u16;
+            let mut spans = prompt.spans;
+            spans.push(ratatui::text::Span::styled(text, style));
+            frame.render_widget(Paragraph::new(Line::from(spans)).style(style), area);
+            // Cursor after the text, clamped inside the area.
+            let x = (area.x + prompt_width + text_width).min(area.right().saturating_sub(1));
+            if area.height > 0 && x >= area.x {
+                frame.set_cursor_position(Position::new(x, area.y));
+            }
+        }
+        Element::VRule(style) => {
+            let buffer = frame.buffer_mut();
+            for y in area.y..area.bottom() {
+                if let Some(cell) = buffer.cell_mut((area.x, y)) {
+                    cell.set_symbol("│").set_style(style);
+                }
+            }
+        }
     }
 }
 

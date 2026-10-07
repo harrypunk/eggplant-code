@@ -47,15 +47,31 @@ pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
         })
         .collect();
 
-    Element::Bordered {
-        title: Some(Line::from(format!(" {} ", props.title))),
-        border_style: Style::default().fg(theme.comment),
-        style: base,
-        child: Box::new(Element::Text {
-            lines: rows,
-            style: base,
-            wrap: false,
-        }),
+    // Borderless: the picker's outer border + divider are the pane
+    // chrome; the title is a header row above the context lines.
+    Element::Layout {
+        direction: ratatui::layout::Direction::Vertical,
+        constraints: vec![
+            ratatui::layout::Constraint::Length(1),
+            ratatui::layout::Constraint::Min(1),
+        ],
+        children: vec![
+            Element::Text {
+                lines: vec![Line::from(Span::styled(
+                    format!(" {} ", props.title),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ))],
+                style: base,
+                wrap: false,
+            },
+            Element::Text {
+                lines: rows,
+                style: base,
+                wrap: false,
+            },
+        ],
     }
 }
 
@@ -120,9 +136,9 @@ mod tests {
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
-        // Row layout inside the border: y=1 is "before", y=2 the focus row.
-        // Gutter " 2 │ " is 5 cells wide; match cols 4..9 start at x=1+5+4.
-        let gutter = 1 + 5;
+        // Header row at y=0; context rows start at y=1 (focus row y=2).
+        // Gutter " 2 │ " is 5 cells wide; match cols 4..9 start at x=5+4.
+        let gutter = 5;
         assert_eq!(buffer[(gutter, 2)].bg, theme.selection, "focus row banded");
         for x in gutter + 4..gutter + 9 {
             assert_eq!(buffer[(x, 2)].bg, theme.search_current, "col {x} matched");
