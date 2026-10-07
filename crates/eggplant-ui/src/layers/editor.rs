@@ -14,8 +14,8 @@ use crate::components::editor::{self, EditorLine, EditorProps};
 use crate::components::welcome::{self, WelcomeProps};
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
-use crate::viewport::Viewport;
 use eggplant_core::editing::{self, Resolved, ViewAction};
+use eggplant_core::viewport::Viewport;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 

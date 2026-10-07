@@ -18,7 +18,7 @@ use crate::components::picker::{self, PickerItem, PickerProps};
 use crate::components::preview::PreviewProps;
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
-use crate::fuzzy;
+use eggplant_core::fuzzy;
 
 /// The picker's closed action set (config: `[keys.picker]`). Typed chars
 /// and Backspace edit the filter — text-field behavior, not bindings.

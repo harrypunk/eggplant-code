@@ -9,10 +9,12 @@ pub mod editing;
 pub mod editor;
 pub mod files;
 pub mod filetree;
+pub mod fuzzy;
 pub mod grep;
 pub mod highlight;
 pub mod input;
 pub mod mode;
+pub mod viewport;
 
 pub use editor::{BufferInfo, Editor, Motion, Register};
 pub use highlight::{HighlightedSpan, SyntaxScope};
