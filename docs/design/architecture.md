@@ -32,6 +32,34 @@ translates at exactly one place: the runner maps crossterm events into
 | `config.rs` | ui | parses TOML into core + theme types (theme is shell) |
 | `theme/`, `compositor.rs`, `element.rs`, `components/`, `layers/`, `runner.rs`, `terminal.rs`, `startup.rs`, `topbar.rs`, `statusline.rs` | ui | rendering, event loop, chrome |
 
+## Shell state: slices + intents (React-style)
+
+`App` is a **composition of cohesive slices**, not a flat bag — each
+slice owns its data and behavior:
+
+| slice | owns |
+|---|---|
+| `editor` (core facade) | buffers, cursor, modes, history |
+| `workspace` | project root + ignore rules |
+| `notifications` | the toast queue |
+| `theme: ThemeState` | active theme, follow source, probe cadence |
+| `input: InputState` | registry, modal keymaps, layer keymaps, pending input |
+| `leap`, `wrap` | active overlay; the line-fitting pref |
+
+`App` itself holds only the composition, the lifecycle, and
+**cross-slice selectors** (`line_labels`, `dims_editor_text`) — narrow
+queries that new overlays extend without touching consumers.
+
+Layers receive `App` uniformly (heterogeneous dispatch demands it) but
+follow the React contract: **reads** flow through `&App` at event time;
+**writes** to other slices are expressed as **intents** (data),
+interpreted in one place. The model instance is `layers::picker`:
+`on_select: fn(&T) -> Select` — picker specs are pure data + pure fns;
+the `Select` enum (`OpenAt`, `JumpToLine`, `Execute`, …) is interpreted
+by the picker layer, the only place picker effects live. Precedent:
+`editing.rs`'s resolve/interpret split and `KeyResult::Execute` were
+already this pattern at smaller scales.
+
 ## Consequences
 
 - **The agent seam is real**: `eggplant-agent` can construct an `Editor`,

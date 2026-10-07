@@ -1,11 +1,9 @@
 //! The file picker (`Space f p`): a picker over workspace files.
 
 use crate::app::App;
-use crate::compositor::KeyResult;
-use crate::layers::notification::Notification;
 use eggplant_core::files::FileEntry;
 
-use super::picker::{Picker, PickerSource, PickerSpec};
+use super::picker::{Picker, PickerSource, PickerSpec, Select};
 
 /// Pathological-tree guard: plenty for real projects, bounded for `/`.
 const FILE_CAP: usize = 20_000;
@@ -26,13 +24,9 @@ pub fn file_picker(app: &App) -> Picker<FileEntry> {
                 .unwrap_or_else(|| file.rel.clone());
             (name, file.rel.clone())
         },
-        on_select: |file, app| {
-            if let Err(err) = app.editor.open_buffer(&file.abs) {
-                app.notifications
-                    .push(Notification::error(format!("open {}: {err:#}", file.rel)));
-            }
-            // Opening a file moves the cursor: focus follows (CloseUnfocus).
-            KeyResult::CloseUnfocus
+        on_select: |file| Select::OpenAt {
+            path: file.abs.clone(),
+            at: None,
         },
         preview_of: None,
     })

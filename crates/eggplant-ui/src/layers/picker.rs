@@ -13,11 +13,12 @@ use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
 use crate::app::App;
-use crate::commands::KeyStroke;
+use crate::commands::{Command, KeyStroke};
 use crate::components::picker::{self, PickerItem, PickerProps};
 use crate::components::preview::PreviewProps;
 use crate::compositor::{KeyResult, Layer, LayerKind};
 use crate::element::Element;
+use crate::layers::notification::Notification;
 use eggplant_core::fuzzy;
 
 /// The picker's closed action set (config: `[keys.picker]`). Typed chars
@@ -83,6 +84,56 @@ pub enum PickerSource<T> {
 /// budget.
 pub type PreviewFn<T> = fn(&T, &App, usize) -> Option<PreviewProps>;
 
+/// What selecting an item means — an intent the picker layer interprets
+/// against `App`. Specs are pure data + pure fns: they never touch `App`
+/// for writes (reads happen at event time via `&App` in sources/previews).
+pub enum Select {
+    /// Just close the picker.
+    Close,
+    /// Open the file (optionally jumping to `(line, col)`), then close
+    /// and focus the editor — the buffer owns the result, so it owns the
+    /// focus. Open failures become error notifications.
+    OpenAt {
+        path: std::path::PathBuf,
+        at: Option<(usize, usize)>,
+    },
+    /// Jump the current buffer to a line, close, focus the editor.
+    JumpToLine(usize),
+    /// Close, then run a registry command (the palette's intent).
+    Execute(Command),
+}
+
+/// The single effect interpreter for picker intents.
+fn interpret(select: Select, app: &mut App) -> KeyResult {
+    match select {
+        Select::Close => KeyResult::Close,
+        Select::OpenAt { path, at } => {
+            match app.editor.open_buffer(&path) {
+                Ok(()) => {
+                    if let Some((line, col)) = at {
+                        app.editor.jump_to(line, col);
+                    }
+                }
+                Err(err) => {
+                    let display = path
+                        .strip_prefix(&app.workspace.root)
+                        .unwrap_or(&path)
+                        .display();
+                    app.notifications
+                        .push(Notification::error(format!("open {display}: {err:#}")));
+                }
+            }
+            // Opening a file moves the cursor: focus follows.
+            KeyResult::CloseUnfocus
+        }
+        Select::JumpToLine(line) => {
+            app.editor.move_to_line(line);
+            KeyResult::CloseUnfocus
+        }
+        Select::Execute(command) => KeyResult::Execute(command),
+    }
+}
+
 /// What makes a picker concrete: its item source plus function pointers —
 /// how to display, what Enter does, optionally how to preview.
 pub struct PickerSpec<T> {
@@ -91,8 +142,10 @@ pub struct PickerSpec<T> {
     pub source: PickerSource<T>,
     /// Display projection: (primary column, free-form text).
     pub project: fn(&T) -> (String, String),
-    /// Enter on an item.
-    pub on_select: fn(&T, &mut App) -> KeyResult,
+    /// Enter on an item — returns an INTENT (data), never performs the
+    /// effect. The picker layer interprets it (the Redux pattern: specs
+    /// are pure; effects live in one place).
+    pub on_select: fn(&T) -> Select,
     /// Materialize the selected item's preview (runs at event time).
     /// The third argument is the row budget — the preview pane's text
     /// capacity from the shared layout formula (preview-as-viewport:
@@ -206,7 +259,7 @@ impl<T> Layer for Picker<T> {
         if let Some(action) = eggplant_core::editing::lookup(&app.input.layer_keys.picker, &key) {
             return match action {
                 PickerAction::Confirm => match self.filtered().get(self.selected) {
-                    Some(item) => (self.spec.on_select)(item, app),
+                    Some(item) => interpret((self.spec.on_select)(item), app),
                     None => KeyResult::Close,
                 },
                 PickerAction::Close => KeyResult::Close,
@@ -264,7 +317,7 @@ mod tests {
             title: "test",
             source,
             project: |item| (item.0.clone(), String::new()),
-            on_select: |_, _| KeyResult::Close,
+            on_select: |_| Select::Close,
             preview_of: None,
         }
     }

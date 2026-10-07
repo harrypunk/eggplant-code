@@ -5,10 +5,8 @@ use eggplant_core::grep::{self, GrepHit};
 
 use crate::app::App;
 use crate::components::preview::{PreviewProps, PreviewRow};
-use crate::compositor::KeyResult;
-use crate::layers::notification::Notification;
 
-use super::picker::{Picker, PickerSource, PickerSpec};
+use super::picker::{Picker, PickerSource, PickerSpec, Select};
 
 /// Context lines BEFORE the hit — the preview's scroll position.
 /// Below it, the file fills the pane (`budget` rows, the pane's real
@@ -29,15 +27,9 @@ pub fn project_grep(_app: &App) -> Picker<GrepHit> {
                 hit.text.trim().to_owned(),
             )
         },
-        on_select: |hit, app| {
-            match app.editor.open_buffer(&hit.abs) {
-                Ok(()) => app.editor.jump_to(hit.line, hit.cols.0),
-                Err(err) => app
-                    .notifications
-                    .push(Notification::error(format!("open {}: {err:#}", hit.rel))),
-            }
-            // Jumping to a match moves the cursor: focus follows.
-            KeyResult::CloseUnfocus
+        on_select: |hit| Select::OpenAt {
+            path: hit.abs.clone(),
+            at: Some((hit.line, hit.cols.0)),
         },
         preview_of: Some(preview_props),
     })
