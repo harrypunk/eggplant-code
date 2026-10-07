@@ -10,18 +10,7 @@ use crate::element::Element;
 use crate::theme::Theme;
 
 /// Everything the preview needs — nothing more.
-pub struct PreviewProps {
-    /// Frame title ("src/config.rs:12").
-    pub title: String,
-    /// 0-based line number of `lines[0]`.
-    pub first_line: usize,
-    /// The context window.
-    pub lines: Vec<String>,
-    /// Index into `lines` of the match row.
-    pub focus_row: usize,
-    /// Char-column range of the match within the focus row.
-    pub focus_cols: (usize, usize),
-}
+pub use eggplant_core::grep::ContextWindow as PreviewProps;
 
 pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
     let base = Style::default().fg(theme.fg).bg(theme.bg);

@@ -611,6 +611,7 @@ dependencies = [
  "helix-loader",
  "helix-view",
  "ignore",
+ "regex",
  "tokio",
 ]
 
@@ -621,7 +622,6 @@ dependencies = [
  "crossterm 0.29.0",
  "eggplant-core",
  "ratatui",
- "regex",
  "serde",
  "termbg",
  "toml 0.9.12+spec-1.1.0",

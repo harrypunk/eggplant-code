@@ -12,3 +12,4 @@ arc-swap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 ignore.workspace = true
+regex = "1"

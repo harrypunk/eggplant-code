@@ -15,7 +15,6 @@ pub mod element;
 pub mod fuzzy;
 pub mod keymaps;
 pub mod layers;
-pub mod project_grep;
 pub mod runner;
 pub mod startup;
 pub mod statusline;

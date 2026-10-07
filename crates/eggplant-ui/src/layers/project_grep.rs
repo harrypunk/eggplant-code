@@ -4,7 +4,7 @@
 use crate::app::App;
 use crate::compositor::KeyResult;
 use crate::layers::notification::Notification;
-use crate::project_grep::{self, GrepHit};
+use eggplant_core::grep::{self, GrepHit};
 
 use super::picker::{Picker, PickerSource, PickerSpec};
 
@@ -14,7 +14,7 @@ pub fn project_grep(_app: &App) -> Picker<GrepHit> {
     Picker::new(PickerSpec {
         title: "project grep",
         source: PickerSource::Query {
-            run: |input, app| project_grep::search_workspace(&app.workspace, input),
+            run: |input, app| grep::search_workspace(&app.workspace, input),
         },
         project: |hit| {
             (
@@ -32,6 +32,6 @@ pub fn project_grep(_app: &App) -> Picker<GrepHit> {
             // Jumping to a match moves the cursor: focus follows.
             KeyResult::CloseUnfocus
         },
-        preview_of: Some(|hit, _| project_grep::preview(hit)),
+        preview_of: Some(|hit, _| grep::preview(hit)),
     })
 }

@@ -9,8 +9,22 @@ use std::path::PathBuf;
 
 use regex::Regex;
 
-use crate::components::preview::PreviewProps;
-use eggplant_core::files::Workspace;
+/// The preview data for a hit: a numbered context window (plain data —
+/// the shell decides how to paint it).
+pub struct ContextWindow {
+    /// "src/config.rs:12".
+    pub title: String,
+    /// 0-based line number of `lines[0]`.
+    pub first_line: usize,
+    /// The context lines.
+    pub lines: Vec<String>,
+    /// Index into `lines` of the hit row.
+    pub focus_row: usize,
+    /// Char-column range of the match within the focus row.
+    pub focus_cols: (usize, usize),
+}
+
+use crate::files::Workspace;
 
 /// Don't search below this pattern length (like leap's 2 chars).
 pub const MIN_PATTERN: usize = 2;
@@ -128,7 +142,7 @@ fn grep_file(regex: &Regex, rel: String, abs: PathBuf) -> Vec<GrepHit> {
 
 /// Materialize the preview for a hit: `PREVIEW_CONTEXT` lines around it,
 /// clamped at the file's start.
-pub fn preview(hit: &GrepHit) -> Option<PreviewProps> {
+pub fn preview(hit: &GrepHit) -> Option<ContextWindow> {
     let text = std::fs::read_to_string(&hit.abs).ok()?;
     let lines: Vec<&str> = text.lines().collect();
     let first_line = hit.line.saturating_sub(PREVIEW_CONTEXT);
@@ -138,7 +152,7 @@ pub fn preview(hit: &GrepHit) -> Option<PreviewProps> {
         .take(2 * PREVIEW_CONTEXT + 1)
         .map(|line| (*line).to_owned())
         .collect();
-    Some(PreviewProps {
+    Some(ContextWindow {
         title: format!("{}:{}", hit.rel, hit.line + 1),
         first_line,
         focus_row: hit.line - first_line,
