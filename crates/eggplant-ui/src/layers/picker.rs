@@ -90,7 +90,8 @@ pub struct PickerSpec<T> {
     /// Enter on an item.
     pub on_select: fn(&T, &mut App) -> KeyResult,
     /// Materialize the selected item's preview (runs at event time).
-    pub preview_of: Option<fn(&T, &App) -> PreviewProps>,
+    /// `None` when the item has nothing previewable.
+    pub preview_of: Option<fn(&T, &App) -> Option<PreviewProps>>,
 }
 
 pub struct Picker<T> {
@@ -160,7 +161,7 @@ impl<T> Picker<T> {
         self.preview = self.spec.preview_of.and_then(|preview_of| {
             self.filtered()
                 .get(self.selected)
-                .map(|item| preview_of(item, app))
+                .and_then(|item| preview_of(item, app))
         });
     }
 }
@@ -291,14 +292,14 @@ mod tests {
     #[test]
     fn preview_materializes_on_selection_and_input() {
         let run = |_: &str, _: &App| -> Vec<Item> { vec![Item("one".into()), Item("two".into())] };
-        let preview_of = |item: &Item, _: &App| -> PreviewProps {
-            PreviewProps {
+        let preview_of = |item: &Item, _: &App| -> Option<PreviewProps> {
+            Some(PreviewProps {
                 title: item.0.clone(),
                 first_line: 0,
                 lines: vec![item.0.clone()],
                 focus_row: 0,
                 focus_cols: (0, 1),
-            }
+            })
         };
         let mut picker = Picker::new(PickerSpec {
             preview_of: Some(preview_of),

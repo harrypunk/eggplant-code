@@ -7,5 +7,6 @@ pub mod leap;
 pub mod notification;
 pub mod palette;
 pub mod picker;
+pub mod project_grep;
 pub mod search_prompt;
 pub mod which_key;

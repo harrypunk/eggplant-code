@@ -305,6 +305,11 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
                 description: "grep lines",
                 command: "search.lines",
             },
+            KeyNode::Leaf {
+                key: 'p',
+                description: "in project (live)",
+                command: "search.project",
+            },
         ],
     },
     KeyNode::Group {
@@ -428,6 +433,13 @@ pub fn default_registry() -> Registry {
             "Grep lines in buffer (live)",
             |app, compositor| {
                 compositor.push(Box::new(grep::buffer_grep(app.editor.buffer_lines())));
+            },
+        ),
+        Command::app(
+            "search.project",
+            "Live grep across the workspace",
+            |app, compositor| {
+                compositor.push(Box::new(crate::layers::project_grep::project_grep(app)));
             },
         ),
         Command::app(

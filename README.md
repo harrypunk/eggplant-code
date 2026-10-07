@@ -88,7 +88,7 @@ Space
 ├── s +search
 │   ├── b in buffer        — live /-style search, n/N cycle
 │   ├── c grep lines       — live picker over buffer lines
-│   └── p in project  ◌    — workspace live-grep (fast path: `s r`)
+│   └── p in project       — workspace live-grep with preview pane
 ├── g +goto
 │   ├── c char             — 2-char leap jump
 │   ├── d definition  ◌    — LSP (fast path: `g d`)
