@@ -8,6 +8,7 @@ pub mod dialog;
 pub mod editor;
 pub mod files_panel;
 pub mod picker;
+pub mod preview;
 pub mod prompt;
 pub mod statusline;
 pub mod toasts;
