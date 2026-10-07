@@ -229,15 +229,26 @@ impl Editor {
             search: None,
             backend,
         };
-        editor.reset_cursor();
+        editor.restore_cursor();
         editor
     }
 
-    fn reset_cursor(&mut self) {
-        let view_id = self.view.id;
-        if let Some(doc) = self.doc_mut() {
-            doc.set_selection(view_id, Selection::point(0));
+    /// Arriving at a buffer: its Document remembers its own selection
+    /// (helix stores selections per document) — re-assert normal-mode
+    /// block-cursor invariants at the remembered position instead of
+    /// resetting to the top. Per-buffer view memory relies on this.
+    fn restore_cursor(&mut self) {
+        self.mode = Mode::Normal;
+        if self.current.is_none() {
+            return; // closing the last buffer leaves the editor empty
         }
+        // A document this view has never touched has no selection entry
+        // yet (fresh from the backend) — start at the top.
+        let head = match self.doc_opt() {
+            Some(doc) if doc.selections().contains_key(&self.view.id) => self.cursor_char_idx(),
+            _ => 0,
+        };
+        self.set_cursor(head);
     }
 
     /// Commit pending changes as one undo revision (vim granularity: one
@@ -295,7 +306,7 @@ impl Editor {
         self.next_slot += 1;
         self.buffers.push(Buffer::new(doc, slot));
         self.current = Some(self.buffers.len() - 1);
-        self.reset_cursor();
+        self.restore_cursor();
         self.generation += 1;
         Ok(())
     }
@@ -306,7 +317,7 @@ impl Editor {
         }
         if self.current != Some(index) {
             self.current = Some(index);
-            self.reset_cursor();
+            self.restore_cursor();
             self.generation += 1;
         }
         Ok(())
@@ -327,7 +338,7 @@ impl Editor {
         } else {
             Some(index.min(self.buffers.len() - 1))
         };
-        self.reset_cursor();
+        self.restore_cursor();
         self.generation += 1;
         Ok(())
     }
@@ -923,7 +934,9 @@ impl Editor {
     }
 
     /// Slot of the current buffer (`None` when bufferless).
-    fn current_slot(&self) -> Option<usize> {
+    /// Stable id of the current buffer (monotonic, survives closes) —
+    /// the key for per-buffer UI state (view memory).
+    pub fn current_slot(&self) -> Option<usize> {
         self.current.map(|i| self.buffers[i].slot)
     }
 
@@ -1501,6 +1514,31 @@ mod tests {
 
         std::fs::remove_file(&path_a).unwrap();
         std::fs::remove_file(&path_b).unwrap();
+    }
+
+    #[test]
+    fn switching_buffers_restores_the_remembered_cursor() {
+        let a = temp_file("view-mem-a", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n");
+        let b = temp_file("view-mem-b", "x\ny\nz\n");
+        let mut ed = Editor::open(&a).unwrap();
+        ed.open_buffer(&b).unwrap();
+        ed.switch_buffer(0).unwrap();
+        ed.move_to_line(7); // deep in file A
+        assert_eq!(ed.cursor().0, 7);
+
+        ed.switch_buffer(1).unwrap();
+        assert_eq!(ed.cursor(), (0, 0), "B was never visited: top");
+
+        ed.move_to_line(2);
+        ed.switch_buffer(0).unwrap();
+        assert_eq!(ed.cursor().0, 7, "A remembers its cursor");
+
+        ed.switch_buffer(1).unwrap();
+        assert_eq!(ed.cursor().0, 2, "B remembers too");
+        assert_eq!(ed.mode(), Mode::Normal, "mode is normalized on arrival");
+
+        std::fs::remove_file(a).unwrap();
+        std::fs::remove_file(b).unwrap();
     }
 
     #[test]

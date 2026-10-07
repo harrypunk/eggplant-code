@@ -132,7 +132,9 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 - [ ] **M8 — Chrome UX**: ~~custom theme files~~ → **ghostty theme following landed**
       (ThemeSpec boundary + pure derive; OSC 11 probe via termbg; focus-in + 3s re-probe;
       design doc: `docs/design/theme.md`; user TOML theme files = phase B),
-      per-buffer view memory (cursor+scroll survive buffer switches), mouse support.
+      ~~per-buffer view memory~~ ✅ (cursor lives in the Document — the facade
+      restores instead of resetting; one Viewport per stable buffer slot),
+      mouse support.
 - [ ] **M9 — LSP**: diagnostics/goto/completion via helix-lsp (reused, behind the facade).
       Ready seams: `g d` is one arm in the resolver; picker infra covers references/symbols.
 - [ ] **M10 — AI v1 resumes** (unhold M4), then AI v2: agentic edits w/ diff review.

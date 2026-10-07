@@ -21,7 +21,10 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Default)]
 pub struct EditorSurface {
-    viewport: Viewport,
+    /// Per-buffer view memory: one viewport per buffer slot (slots are
+    /// stable, monotonic ids). A slot's viewport survives switching away
+    /// and back — the cursor does too (the facade restores it).
+    viewports: std::collections::HashMap<usize, Viewport>,
     /// Last area from the compositor's `resize` hook — text width feeds
     /// viewport sync (horizontal scroll, wrap height).
     area: Rect,
@@ -32,12 +35,28 @@ impl EditorSurface {
         Self::default()
     }
 
+    /// The current buffer's viewport (created on first sight).
+    fn viewport(&mut self, app: &App) -> Option<&mut Viewport> {
+        let slot = app.editor.current_slot()?;
+        let viewport = self.viewports.entry(slot).or_default();
+        viewport.resize(self.area.height as usize);
+        Some(viewport)
+    }
+
     fn sync_viewport(&mut self, app: &App) {
-        self.viewport.sync(
-            app.editor.generation(),
+        let slot = app.editor.current_slot();
+        let wrap = app.wrap;
+        let width = self.text_width(app);
+        let Some(viewport) = self.viewport(app) else {
+            return; // no buffer: nothing to sync
+        };
+        // The slot IS the identity of what this viewport shows (one slot,
+        // one document, ever) — no generation reset on switching.
+        viewport.sync(
+            slot.unwrap_or(0),
             app.editor.cursor(),
-            app.wrap,
-            self.text_width(app),
+            wrap,
+            width,
             &|line| app.editor.line_char_len(line),
         );
     }
@@ -52,15 +71,18 @@ impl EditorSurface {
     /// goes through the facade (buffer state).
     fn apply_view(&mut self, view: ViewAction, app: &mut App) {
         let (cursor_line, _) = app.editor.cursor();
+        let Some(viewport) = self.viewport(app) else {
+            return;
+        };
         match view {
-            ViewAction::CenterCursor => self.viewport.center_on(cursor_line),
+            ViewAction::CenterCursor => viewport.center_on(cursor_line),
             ViewAction::PageDown => {
                 let last = app.editor.display_line_count().saturating_sub(1);
-                let target = self.viewport.page_down(cursor_line, last);
+                let target = viewport.page_down(cursor_line, last);
                 app.editor.move_to_line(target); // facade clamps
             }
             ViewAction::PageUp => {
-                let target = self.viewport.page_up(cursor_line);
+                let target = viewport.page_up(cursor_line);
                 app.editor.move_to_line(target);
             }
         }
@@ -74,8 +96,12 @@ impl Layer for EditorSurface {
         }
         let width = self.text_width(app);
         let line_count = app.editor.display_line_count();
-        let rows = self
-            .viewport
+        let viewport = app
+            .editor
+            .current_slot()
+            .and_then(|slot| self.viewports.get(&slot).copied())
+            .unwrap_or_default();
+        let rows = viewport
             .layout_rows(app.wrap, width, &|line| app.editor.line_char_len(line))
             .into_iter()
             .map(|row| {
@@ -113,7 +139,6 @@ impl Layer for EditorSurface {
 
     fn resize(&mut self, area: Rect, app: &App) {
         self.area = area;
-        self.viewport.resize(area.height as usize);
         self.sync_viewport(app);
     }
 
@@ -142,5 +167,63 @@ impl Layer for EditorSurface {
 
     fn id(&self) -> &'static str {
         "editor"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::App;
+
+    fn two_buffer_app() -> App {
+        let dir = std::env::temp_dir().join(format!("eggplant-vm-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lines = |n: usize| (1..=n).map(|i| format!("line {i}\n")).collect::<String>();
+        std::fs::write(dir.join("a.txt"), lines(200)).unwrap();
+        std::fs::write(dir.join("b.txt"), lines(200)).unwrap();
+        let editor = eggplant_core::Editor::open(dir.join("a.txt")).unwrap();
+        let mut app = App::new(editor);
+        app.editor.open_buffer(dir.join("b.txt")).unwrap();
+        app.editor.switch_buffer(0).unwrap(); // start on A
+        app
+    }
+
+    #[test]
+    fn each_buffer_keeps_its_own_viewport() {
+        let mut app = two_buffer_app();
+        let mut surface = EditorSurface::new();
+        let area = Rect::new(0, 0, 40, 10);
+        let sync = |surface: &mut EditorSurface, app: &App| {
+            surface.resize(area, app); // resize drives sync
+        };
+
+        // Deep into A: the viewport scrolls to follow the cursor.
+        app.editor.move_to_line(150);
+        sync(&mut surface, &app);
+        let slot_a = app.editor.current_slot().unwrap();
+        let scrolled = surface.viewports[&slot_a].first_visible();
+        assert!(scrolled > 100, "A scrolled deep, got {scrolled}");
+
+        // Switch to B: fresh viewport at the top.
+        app.editor.switch_buffer(1).unwrap();
+        sync(&mut surface, &app);
+        let slot_b = app.editor.current_slot().unwrap();
+        assert_ne!(slot_a, slot_b);
+        assert_eq!(surface.viewports[&slot_b].first_visible(), 0);
+        assert_eq!(
+            surface.viewports[&slot_a].first_visible(),
+            scrolled,
+            "A's viewport is stashed, not destroyed"
+        );
+
+        // Back to A: the deep scroll is restored.
+        app.editor.switch_buffer(0).unwrap();
+        sync(&mut surface, &app);
+        assert_eq!(surface.viewports[&slot_a].first_visible(), scrolled);
+
+        std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("eggplant-vm-{}", std::process::id())),
+        )
+        .ok();
     }
 }

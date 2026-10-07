@@ -65,7 +65,7 @@ fn horizontal_reveal(col_offset: usize, cursor_col: usize, wrap: bool, width: us
 /// top row, which char column at the left edge (horizontal scroll, used in
 /// nowrap mode only), and how many rows the screen has. All methods are
 /// pure state transitions.
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct Viewport {
     /// First visible line (vertical scroll offset).
     scroll: usize,
