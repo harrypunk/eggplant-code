@@ -97,24 +97,37 @@ search_workspace(ws, pattern) -> Vec<GrepHit>       // walk + read + core
 preview(hit, context) -> PreviewProps               // read around hit.line
 ```
 
-## Preview component
+## Preview: a peek, not hand-built text
 
-`components/preview.rs` — pure props → `Element`:
+The preview is a **read-only core document** (`core::peek::Peek`): opened
+through the same backend loader + language detection as buffers, but never
+in the buffer list — no cursor, no history. The layer materializes
+`PreviewProps` from `peek.highlighted_line(line)` per context row, so the
+preview pane renders through **the editor's own styling pipeline**
+(`components::editor::style_cells`) — syntax highlighting is free, and
+there is exactly one styling implementation in the codebase. Files that
+fail to open fall back to plain context lines
+(`core::peek::context_lines`, unscoped spans).
 
 ```rust
 struct PreviewProps {
-    title: String,               // "src/config.rs:12"
-    first_line: usize,           // 0-based number of lines[0]
-    lines: Vec<String>,          // context window (±3 around the hit)
-    focus_row: usize,            // index into lines (the hit)
-    focus_cols: (usize, usize),  // match band within that row
+    title: String,          // "src/config.rs:12"
+    first_line: usize,      // gutter numbering base
+    rows: Vec<PreviewRow>,  // spans + match band
+                            // scroll = hit − 5, rows = pane capacity
+    focus_row: usize,       // hit row (number accented)
 }
 ```
 
-Numbered lines (dim gutter, hit number accented), hit row gets the
-selection band, match columns the search-current color. The picker view
-composes it: preview present → float widens to 80%, split
-`[2/5 list | 3/5 preview]`; absent → today's narrow float.
+The picker composes it: preview present → tall split
+`[40% list │ 60% preview]`; absent → the narrow float.
+
+**The preview is a viewport, not a window of text**: its state is
+`(Peek, scroll)` where `scroll = hit − 5`. The pane's row budget comes
+from one shared layout formula (`components::picker::preview_budget`) —
+the view builds its constraints from it, the container derives exactly
+that many rows from the scroll. No arbitrary cap; a future "scroll the
+preview" key just moves `scroll`.
 
 ## SOLID, concretely
 

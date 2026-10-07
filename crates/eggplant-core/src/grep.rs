@@ -2,27 +2,12 @@
 //! their context (see docs/design/live-grep.md).
 //!
 //! The pure core (`grep_text`) knows nothing about files; the fs shell
-//! (`search_workspace`, `preview`) is thin and uses the same `Workspace`
+//! (`search_workspace`) is thin and uses the same `Workspace`
 //! file set as the file picker — one truth for "the project".
 
 use std::path::PathBuf;
 
 use regex::Regex;
-
-/// The preview data for a hit: a numbered context window (plain data —
-/// the shell decides how to paint it).
-pub struct ContextWindow {
-    /// "src/config.rs:12".
-    pub title: String,
-    /// 0-based line number of `lines[0]`.
-    pub first_line: usize,
-    /// The context lines.
-    pub lines: Vec<String>,
-    /// Index into `lines` of the hit row.
-    pub focus_row: usize,
-    /// Char-column range of the match within the focus row.
-    pub focus_cols: (usize, usize),
-}
 
 use crate::files::Workspace;
 
@@ -34,8 +19,6 @@ pub const MAX_HITS: usize = 500;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// A NUL in the first this-many bytes marks a file as binary.
 const BINARY_SNIFF_BYTES: usize = 8 * 1024;
-/// Preview context lines above/below the hit (±5).
-const PREVIEW_CONTEXT: usize = 5;
 
 /// One match: where it is, and the line it sits on.
 #[derive(Debug, Clone)]
@@ -140,27 +123,6 @@ fn grep_file(regex: &Regex, rel: String, abs: PathBuf) -> Vec<GrepHit> {
         .collect()
 }
 
-/// Materialize the preview for a hit: `PREVIEW_CONTEXT` lines around it,
-/// clamped at the file's start.
-pub fn preview(hit: &GrepHit) -> Option<ContextWindow> {
-    let text = std::fs::read_to_string(&hit.abs).ok()?;
-    let lines: Vec<&str> = text.lines().collect();
-    let first_line = hit.line.saturating_sub(PREVIEW_CONTEXT);
-    let window: Vec<String> = lines
-        .iter()
-        .skip(first_line)
-        .take(2 * PREVIEW_CONTEXT + 1)
-        .map(|line| (*line).to_owned())
-        .collect();
-    Some(ContextWindow {
-        title: format!("{}:{}", hit.rel, hit.line + 1),
-        first_line,
-        focus_row: hit.line - first_line,
-        focus_cols: hit.cols,
-        lines: window,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn grep_workspace_and_preview_over_a_temp_dir() {
+    fn grep_workspace_over_a_temp_dir() {
         let root = std::env::temp_dir().join(format!("eggplant-grep-{}", std::process::id()));
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(
@@ -247,13 +209,6 @@ mod tests {
         assert_eq!(hits[0].rel, "src/main.rs");
         assert_eq!(hits[0].line, 1);
         assert_eq!(hits[0].cols, (8, 14));
-
-        // Preview: ±3 lines clamped at the file start.
-        let preview = preview(&hits[0]).unwrap();
-        assert_eq!(preview.first_line, 0, "clamped at file start");
-        assert_eq!(preview.focus_row, 1);
-        assert_eq!(preview.focus_cols, (8, 14));
-        assert_eq!(preview.lines.len(), 4);
 
         // Below the minimum pattern length: nothing.
         assert!(search_workspace(&ws, "n").is_empty());

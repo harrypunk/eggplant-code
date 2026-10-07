@@ -79,6 +79,10 @@ pub enum PickerSource<T> {
     Query { run: fn(&str, &App) -> Vec<T> },
 }
 
+/// The preview seam: materialize an item's preview given the pane's row
+/// budget.
+pub type PreviewFn<T> = fn(&T, &App, usize) -> Option<PreviewProps>;
+
 /// What makes a picker concrete: its item source plus function pointers —
 /// how to display, what Enter does, optionally how to preview.
 pub struct PickerSpec<T> {
@@ -90,13 +94,19 @@ pub struct PickerSpec<T> {
     /// Enter on an item.
     pub on_select: fn(&T, &mut App) -> KeyResult,
     /// Materialize the selected item's preview (runs at event time).
+    /// The third argument is the row budget — the preview pane's text
+    /// capacity from the shared layout formula (preview-as-viewport:
+    /// produce `scroll .. scroll + budget` rows, never a magic cap).
     /// `None` when the item has nothing previewable.
-    pub preview_of: Option<fn(&T, &App) -> Option<PreviewProps>>,
+    pub preview_of: Option<PreviewFn<T>>,
 }
 
 pub struct Picker<T> {
     input: String,
     selected: usize,
+    /// Last area from the compositor's `resize` hook — feeds the preview
+    /// row budget.
+    area: Rect,
     /// Materialized items: the whole list for `List`, the last query
     /// result for `Query`.
     items: Vec<T>,
@@ -113,6 +123,7 @@ impl<T> Picker<T> {
         let mut picker = Self {
             input: String::new(),
             selected: 0,
+            area: Rect::default(),
             items,
             preview: None,
             spec,
@@ -156,12 +167,14 @@ impl<T> Picker<T> {
     }
 
     /// Preview is state: materialized here (event time), painted by the
-    /// view (pure).
+    /// view (pure). The budget comes from the layout formula, so exactly
+    /// the visible rows are produced — no arbitrary cap.
     fn refresh_preview(&mut self, app: &App) {
+        let budget = picker::preview_budget(self.area);
         self.preview = self.spec.preview_of.and_then(|preview_of| {
             self.filtered()
                 .get(self.selected)
-                .and_then(|item| preview_of(item, app))
+                .and_then(|item| preview_of(item, app, budget))
         });
     }
 }
@@ -222,6 +235,13 @@ impl<T> Layer for Picker<T> {
                 KeyResult::Consumed
             }
             _ => KeyResult::Consumed, // modal-ish
+        }
+    }
+
+    fn resize(&mut self, area: Rect, app: &App) {
+        if self.area != area {
+            self.area = area;
+            self.refresh_preview(app); // budget changed: re-derive
         }
     }
 
@@ -292,13 +312,18 @@ mod tests {
     #[test]
     fn preview_materializes_on_selection_and_input() {
         let run = |_: &str, _: &App| -> Vec<Item> { vec![Item("one".into()), Item("two".into())] };
-        let preview_of = |item: &Item, _: &App| -> Option<PreviewProps> {
+        let preview_of = |item: &Item, _: &App, _: usize| -> Option<PreviewProps> {
             Some(PreviewProps {
                 title: item.0.clone(),
                 first_line: 0,
-                lines: vec![item.0.clone()],
+                rows: vec![crate::components::preview::PreviewRow {
+                    spans: vec![eggplant_core::HighlightedSpan {
+                        text: item.0.clone(),
+                        scope: None,
+                    }],
+                    search_marks: Vec::new(),
+                }],
                 focus_row: 0,
-                focus_cols: (0, 1),
             })
         };
         let mut picker = Picker::new(PickerSpec {

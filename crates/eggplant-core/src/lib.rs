@@ -14,11 +14,13 @@ pub mod grep;
 pub mod highlight;
 pub mod input;
 pub mod mode;
+pub mod peek;
 pub mod viewport;
 
 pub use editor::{BufferInfo, Editor, Motion, Register};
 pub use highlight::{HighlightedSpan, SyntaxScope};
 pub use mode::Mode;
+pub use peek::Peek;
 
 /// Re-export of the v1 backend so the rest of the workspace never depends
 /// on helix crates directly.

@@ -51,7 +51,8 @@ pub struct RowProps {
 /// Style every char of the line (per-column decorations: selection,
 /// search marks, leap chips), returning `(char, style)` cells. Slicing
 /// happens later — decorations must be computed on full-line columns.
-fn style_cells(line: &EditorLine, dim: bool, theme: &Theme) -> Vec<(char, Style)> {
+/// Shared with the preview pane (one styling implementation).
+pub(crate) fn style_cells(line: &EditorLine, dim: bool, theme: &Theme) -> Vec<(char, Style)> {
     let cells: Vec<(char, Option<eggplant_core::SyntaxScope>)> = line
         .spans
         .iter()
@@ -107,7 +108,7 @@ fn style_cells(line: &EditorLine, dim: bool, theme: &Theme) -> Vec<(char, Style)
 }
 
 /// Group consecutive equal-styled cells into spans.
-fn spans_from(cells: &[(char, Style)]) -> Line<'static> {
+pub(crate) fn spans_from(cells: &[(char, Style)]) -> Line<'static> {
     let mut spans: Vec<Span> = Vec::new();
     for (c, style) in cells {
         match spans.last_mut() {

@@ -39,6 +39,15 @@ pub struct PickerProps<'a> {
 /// panel is a percentage of the screen instead.
 pub const MAX_ROWS: u16 = 8;
 
+/// The one layout formula for a preview panel: panel height = 55% of the
+/// area, so the preview's text capacity is that minus border and header.
+/// The view builds its constraints from this, the layer derives its row
+/// budget from it — single source, identical geometry (the preview-as-
+/// viewport model: scroll = hit − CONTEXT, rows = exactly what fits).
+pub fn preview_budget(area: Rect) -> usize {
+    (area.height as usize * 55 / 100).saturating_sub(3)
+}
+
 /// Center `panel` with percentage spacers (top-hugging) — the declarative
 /// replacement for computed frame rects.
 fn centered(panel: Element, horizontal: [u16; 3], vertical: Vec<Constraint>) -> Element {
@@ -141,7 +150,8 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
             [10, 80, 10],
             vec![
                 Constraint::Length(1),
-                Constraint::Percentage(55),
+                // preview_budget() + border: same formula as the budget.
+                Constraint::Length(preview_budget(area) as u16 + 3),
                 Constraint::Min(0),
             ],
         )
@@ -201,9 +211,14 @@ mod tests {
         let preview = PreviewProps {
             title: "a.rs:1".to_owned(),
             first_line: 0,
-            lines: vec!["hit".to_owned()],
+            rows: vec![crate::components::preview::PreviewRow {
+                spans: vec![eggplant_core::HighlightedSpan {
+                    text: "hit".to_owned(),
+                    scope: None,
+                }],
+                search_marks: vec![(0, 3, true)],
+            }],
             focus_row: 0,
-            focus_cols: (0, 3),
         };
         let props = PickerProps {
             title: "project grep",

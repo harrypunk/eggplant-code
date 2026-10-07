@@ -82,6 +82,15 @@ impl Backend {
     fn scratch_document(&self) -> Document {
         Document::default(self.config.clone(), self.syn_loader.clone())
     }
+
+    /// A read-only peek document (grep/file previews): same loader and
+    /// language detection as buffers, but never in the buffer list.
+    fn peek_document(&self, path: &Path) -> Result<crate::peek::Peek> {
+        Ok(crate::peek::Peek::new(
+            self.open_document(path)?,
+            self.syn_loader.clone(),
+        ))
+    }
 }
 
 /// An open document plus its per-buffer state.
@@ -284,6 +293,11 @@ impl Editor {
 
     fn doc_mut(&mut self) -> Option<&mut Document> {
         self.current.map(|i| &mut self.buffers[i].doc)
+    }
+
+    /// Open a read-only peek of `path` for previews (never a buffer).
+    pub fn peek(&self, path: impl AsRef<Path>) -> Result<crate::peek::Peek> {
+        self.backend.peek_document(path.as_ref())
     }
 
     /// Index of the current buffer; `None` when no buffer is open.
