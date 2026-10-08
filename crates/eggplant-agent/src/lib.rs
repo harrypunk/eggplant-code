@@ -1,4 +1,19 @@
-//! eggplant-agent — native Rust AI agent.
+//! eggplant-agent — the headless AI agent (M10).
 //!
-//! Pi-inspired minimal design: small agent loop, provider abstraction,
-//! tool calling, streaming. Lands in M4; this is a placeholder.
+//! Design: `docs/design/agent.md`. One session, an event stream out, an
+//! `AgentHost` bridge into the editor. Never imports ratatui/crossterm;
+//! owns its own tokio runtime on a dedicated thread.
+
+pub mod agent;
+pub mod host;
+pub mod prompt;
+pub mod provider;
+pub mod session;
+pub mod tool;
+pub mod tools;
+pub mod types;
+
+pub use host::{HostCall, HostClient, HostReply, HostRequest, TextEdit};
+pub use session::{AgentCommand, AgentEvent, AgentSession, SessionMsg};
+pub use tool::Tool;
+pub use types::{ChatEvent, ChatRequest, Message, Role, ToolCall, ToolDecl};
