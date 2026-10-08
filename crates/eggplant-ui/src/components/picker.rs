@@ -78,10 +78,25 @@ pub fn view(props: &PickerProps, area: Rect, sheet: &Stylesheet) -> Element {
         style: base,
     };
 
+    // Scroll window derived from the selection (derive, don't cache):
+    // keep `selected` inside the visible rows, scrolling by one. With a
+    // preview the panel is tall — the list gets the pane's real capacity
+    // (the same shared layout formula as the preview budget).
+    let visible = if props.preview.is_some() {
+        preview_budget(area).max(1)
+    } else {
+        MAX_ROWS as usize
+    };
+    let offset = props
+        .selected
+        .saturating_sub(visible - 1)
+        .min(props.items.len().saturating_sub(visible));
     let rows: Vec<Line> = props
         .items
         .iter()
         .enumerate()
+        .skip(offset)
+        .take(visible)
         .map(|(i, item)| {
             // Contrast-safe on both plain and selected rows.
             let (id_style, desc_style) = if i == props.selected {
@@ -200,6 +215,38 @@ mod tests {
             .expect("description rendered");
         assert_eq!(cell.bg, theme.selection);
         assert_eq!(cell.fg, theme.fg);
+    }
+
+    #[test]
+    fn selection_beyond_the_first_page_scrolls_the_window() {
+        // Regression: the list painted items[..MAX_ROWS] forever; moving
+        // the selection past the page rendered it off-panel.
+        let theme = Theme::default();
+        let items: Vec<PickerItem> = (0..20)
+            .map(|i| PickerItem {
+                primary: format!("item{i:02}"),
+                secondary: String::new(),
+            })
+            .collect();
+        let props = PickerProps {
+            title: "open",
+            input: String::new(),
+            items,
+            selected: 12,
+            preview: None,
+        };
+        let mut terminal = Terminal::new(TestBackend::new(50, 14)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                crate::element::paint(frame, view(&props, area, &Stylesheet::new(&theme)), area);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("item12"), "selected item visible:\n{text}");
+        assert!(!text.contains("item00"), "window scrolled past the top");
+        assert!(!text.contains("item19"), "window bounded by MAX_ROWS");
     }
 
     #[test]
