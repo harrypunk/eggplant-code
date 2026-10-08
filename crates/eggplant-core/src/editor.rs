@@ -169,6 +169,9 @@ impl Buffer {
 pub struct BufferInfo {
     pub index: usize,
     pub name: String,
+    /// Backing file, if any (scratch buffers have none). Data, not a
+    /// display string — consumers project (basename, relative, …).
+    pub path: Option<std::path::PathBuf>,
     pub modified: bool,
     pub current: bool,
     /// Scratch buffers have no backing file.
@@ -378,6 +381,7 @@ impl Editor {
             .map(|(index, b)| BufferInfo {
                 index,
                 name: b.display_name(),
+                path: b.doc.path().map(|p| p.to_path_buf()),
                 modified: b.doc.is_modified(),
                 current: Some(index) == self.current,
                 scratch: b.doc.path().is_none(),

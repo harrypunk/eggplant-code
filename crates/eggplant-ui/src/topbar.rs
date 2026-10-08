@@ -16,7 +16,14 @@ pub fn view(app: &App, area: Rect) -> Element {
         .into_iter()
         .filter(|b| !b.scratch || b.modified || app.editor.buffer_count() == 1)
         .map(|b| BufferTab {
-            name: b.name,
+            // Tabs show the file name, not the path (helix/vscode-style);
+            // scratch buffers keep their display name.
+            name: b
+                .path
+                .as_ref()
+                .and_then(|path| path.file_name())
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or(b.name),
             modified: b.modified,
             current: b.current,
         })
