@@ -387,6 +387,9 @@ pub fn default_registry() -> Registry {
         Command::app("agent.chat", "Chat with the agent (popup)", |_app| {
             vec![AppAction::PushLayer(crate::layers::chat::ChatModal::new())]
         }),
+        Command::app("agent.abort", "Abort the running agent", |_app| {
+            vec![AppAction::AgentAbort]
+        }),
         Command::app("agent.toggle", "Toggle the agent chat window", |_app| {
             vec![AppAction::ToggleLayer {
                 id: crate::layers::chat::PANEL_ID,
@@ -424,6 +427,15 @@ pub fn default_registry() -> Registry {
         (KeyStroke::ctrl('p'), "palette.open"),       // fallback: no kitty protocol
         (KeyStroke::char(' '), "which-key.open"),     // prefix menu
         (KeyStroke::ctrl('i'), "agent.chat"),
+        // Dedicated interrupt key (Esc stays close/unfocus; C-c stays
+        // force-quit globally). Works with no chat view open.
+        (
+            KeyStroke::new(
+                eggplant_core::input::KeyCode::F(8),
+                eggplant_core::input::KeyModifiers::CONTROL,
+            ),
+            "agent.abort",
+        ),
         (KeyStroke::function(2), "demo.dialog"),
         (KeyStroke::function(3), "demo.notification"),
     ];

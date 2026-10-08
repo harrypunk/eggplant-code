@@ -72,7 +72,13 @@ impl ChatView {
                 self.input.pop();
                 Handled::quiet()
             }
+            // Interrupt: C-F8 (dedicated, mirrors the global binding) and
+            // C-c (terminal muscle memory — swallowed by the chat views
+            // anyway, so it can't reach force-quit here).
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Handled::one(AppAction::AgentAbort)
+            }
+            KeyCode::F(8) if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 Handled::one(AppAction::AgentAbort)
             }
             KeyCode::Char(c)
@@ -140,7 +146,7 @@ impl Layer for ChatModal {
             horizontal,
             Element::cleared(
                 self.chat
-                    .view("agent — Esc closes, C-c aborts", horizontal, app),
+                    .view("agent — Esc closes, C-F8 aborts", horizontal, app),
             ),
         )
     }
@@ -184,7 +190,7 @@ impl Layer for ChatPanel {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         Element::cleared(
             self.chat
-                .view("agent — Esc unfocuses, C-c aborts", area, app),
+                .view("agent — Esc unfocuses, C-F8 aborts", area, app),
         )
     }
 

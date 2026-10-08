@@ -28,6 +28,9 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `C-f` / `C-u` | page down / up (cursor and scroll follow) |
 | `]b` / `[b` | next / previous buffer |
 | `Space b 0-9` | jump straight to buffer n (out-of-range ignored) |
+| `Space a i` / `C-i` | agent chat popup |
+| `Space a t` | toggle agent chat window |
+| `C-F8` | abort the running agent |
 | `Space u w` | toggle soft-wrap (off = horizontal scroll) |
 | `n` / `N` | next / previous search match |
 | `Esc` | clear search highlight |
