@@ -22,6 +22,7 @@ pub fn view(app: &App, focused_layer: Option<&'static str>, area: Rect) -> Eleme
                 .map(|((line, col), total)| (line, col, total)),
             pending: app.pending_hint(),
             focused_layer,
+            agent_running: app.agent.running,
         },
         area,
         &app.theme.sheet(),

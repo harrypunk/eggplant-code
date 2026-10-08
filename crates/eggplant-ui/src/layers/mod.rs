@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod dialog;
 pub mod editor;
 pub mod file_picker;

@@ -4,6 +4,7 @@
 //! presentational layer (React function components). Containers in
 //! `crate::layers` own state and events and map them to props.
 
+pub mod chat;
 pub mod dialog;
 pub mod editor;
 pub mod files_panel;

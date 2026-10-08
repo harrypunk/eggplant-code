@@ -200,6 +200,22 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
         ],
     },
     KeyNode::Group {
+        key: 'a',
+        description: "+agent",
+        children: &[
+            KeyNode::Leaf {
+                key: 'i',
+                description: "chat popup",
+                command: "agent.chat",
+            },
+            KeyNode::Leaf {
+                key: 't',
+                description: "toggle chat window",
+                command: "agent.toggle",
+            },
+        ],
+    },
+    KeyNode::Group {
         key: 'b',
         description: "+buffer",
         children: &[
@@ -368,6 +384,17 @@ pub fn default_registry() -> Registry {
         Command::app("theme.cycle", "Cycle to the next color theme", |_| {
             vec![AppAction::CycleTheme]
         }),
+        Command::app("agent.chat", "Chat with the agent (popup)", |_app| {
+            vec![AppAction::PushLayer(crate::layers::chat::ChatModal::new())]
+        }),
+        Command::app("agent.toggle", "Toggle the agent chat window", |_app| {
+            vec![AppAction::ToggleLayer {
+                id: crate::layers::chat::PANEL_ID,
+                make: |_app| {
+                    Ok(crate::layers::chat::ChatPanel::new() as Box<dyn crate::compositor::Layer>)
+                },
+            }]
+        }),
         Command::app(
             "demo.dialog",
             "Toggle demo floating dialog",
@@ -396,6 +423,7 @@ pub fn default_registry() -> Registry {
         (KeyStroke::ctrl_shift('P'), "palette.open"), // terminal casing varies
         (KeyStroke::ctrl('p'), "palette.open"),       // fallback: no kitty protocol
         (KeyStroke::char(' '), "which-key.open"),     // prefix menu
+        (KeyStroke::ctrl('i'), "agent.chat"),
         (KeyStroke::function(2), "demo.dialog"),
         (KeyStroke::function(3), "demo.notification"),
     ];

@@ -5,7 +5,10 @@
 
 use std::io;
 
-use crossterm::event::{DisableFocusChange, EnableFocusChange};
+use crossterm::event::{
+    DisableFocusChange, EnableFocusChange, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -28,6 +31,13 @@ impl TerminalGuard {
         // Focus events: re-probing the terminal theme on focus-in is how
         // we notice the OS light/dark flipping (no push channel exists).
         execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
+        // Kitty keyboard protocol (best-effort): disambiguated keys give
+        // us C-i distinct from Tab (the chat popup shortcut). Terminals
+        // without support ignore the push; C-i then degrades to Tab.
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
         let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
         Ok(Self { terminal })
     }
@@ -43,6 +53,7 @@ impl Drop for TerminalGuard {
         let _ = disable_raw_mode();
         let _ = execute!(
             self.terminal.backend_mut(),
+            PopKeyboardEnhancementFlags,
             LeaveAlternateScreen,
             DisableFocusChange
         );

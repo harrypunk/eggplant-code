@@ -19,6 +19,8 @@ pub struct StatuslineProps {
     pub pending: Option<String>,
     /// Focused layer id, shown as a tag when it isn't the base editor.
     pub focused_layer: Option<&'static str>,
+    /// An agent run is in flight (the chat views needn't be open).
+    pub agent_running: bool,
 }
 
 pub fn view(props: &StatuslineProps, area: Rect, sheet: &Stylesheet) -> Element {
@@ -33,6 +35,11 @@ pub fn view(props: &StatuslineProps, area: Rect, sheet: &Stylesheet) -> Element 
         Some(id) if id != "editor" => format!(" ‹{id}›"),
         _ => String::new(),
     };
+    let agent_tag = if props.agent_running {
+        " ‹agent…›"
+    } else {
+        ""
+    };
     let right = props.position.map_or(String::new(), |(line, col, total)| {
         format!(" {}:{}/{} ", line + 1, col + 1, total)
     });
@@ -41,8 +48,13 @@ pub fn view(props: &StatuslineProps, area: Rect, sheet: &Stylesheet) -> Element 
         .as_ref()
         .map_or(String::new(), |hint| format!("{hint}  "));
 
-    let left_width =
-        2 + props.mode.as_str().len() + 1 + name.len() + modified.len() + focus_tag.len();
+    let left_width = 2
+        + props.mode.as_str().len()
+        + 1
+        + name.len()
+        + modified.len()
+        + focus_tag.len()
+        + agent_tag.len();
     let padding = (area.width as usize).saturating_sub(left_width + pending.len() + right.len());
 
     let name_span = if props.buffer_name.is_some() {
@@ -54,6 +66,7 @@ pub fn view(props: &StatuslineProps, area: Rect, sheet: &Stylesheet) -> Element 
         Span::styled(format!(" {} ", props.mode), sheet.style(mode_class)),
         Span::raw(name_span),
         Span::styled(focus_tag, sheet.style(StyleClass::AccentAlt)),
+        Span::styled(agent_tag, sheet.style(StyleClass::Warn)),
         Span::raw(" ".repeat(padding)),
         Span::styled(pending, sheet.emphasized(StyleClass::AccentAlt)),
         Span::raw(right),
