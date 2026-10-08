@@ -93,6 +93,11 @@ impl ThemeState {
         }
     }
 
+    /// The components' styling handle (class → style; colors unreachable).
+    pub fn sheet(&self) -> crate::stylesheet::Stylesheet<'_> {
+        crate::stylesheet::Stylesheet::new(&self.current)
+    }
+
     /// Cycle to the next builtin theme; returns the new theme's name.
     pub fn cycle(&mut self) -> &'static str {
         self.current = Theme::next_after(self.current.name);

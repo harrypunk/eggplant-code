@@ -21,5 +21,5 @@ pub fn view(app: &App, area: Rect) -> Element {
             current: b.current,
         })
         .collect();
-    topbar::view(&tabs, area, &app.theme.current)
+    topbar::view(&tabs, area, &app.theme.sheet())
 }

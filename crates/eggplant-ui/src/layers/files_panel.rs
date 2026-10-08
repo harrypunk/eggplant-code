@@ -248,7 +248,7 @@ impl Layer for FilesPanel {
                 focused,
             },
             area,
-            &app.theme.current,
+            &app.theme.sheet(),
         )
     }
 

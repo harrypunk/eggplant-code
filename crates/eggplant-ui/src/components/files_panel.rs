@@ -1,11 +1,10 @@
 //! The file-explorer panel: titled border + indented tree with selection.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// One visible tree row, projected for display.
 pub struct RowProps {
@@ -34,11 +33,11 @@ pub struct FilesPanelProps {
     pub focused: bool,
 }
 
-pub fn view(props: &FilesPanelProps, _area: Rect, theme: &Theme) -> Element {
+pub fn view(props: &FilesPanelProps, _area: Rect, sheet: &Stylesheet) -> Element {
     let border_style = if props.focused {
-        Style::default().fg(theme.accent)
+        sheet.style(StyleClass::Accent)
     } else {
-        Style::default().fg(theme.comment)
+        sheet.style(StyleClass::Muted)
     };
 
     let rows: Vec<Line> = props
@@ -53,14 +52,11 @@ pub fn view(props: &FilesPanelProps, _area: Rect, theme: &Theme) -> Element {
             };
             let label = format!("{}{}{}", "  ".repeat(row.depth), marker, row.name);
             let style = if i == props.selected_in_view {
-                Style::default()
-                    .fg(theme.fg)
-                    .bg(theme.selection)
-                    .add_modifier(Modifier::BOLD)
+                sheet.style(StyleClass::SelectedStrong)
             } else if matches!(row.kind, RowKind::Dir { .. }) {
-                Style::default().fg(theme.info)
+                sheet.style(StyleClass::Info)
             } else {
-                Style::default().fg(theme.fg)
+                sheet.style(StyleClass::Text)
             };
             Line::from(Span::styled(label, style))
         })
@@ -69,7 +65,7 @@ pub fn view(props: &FilesPanelProps, _area: Rect, theme: &Theme) -> Element {
     Element::cleared(Element::Bordered {
         title: Some(Line::from(format!(" {} ", props.title))),
         border_style,
-        style: Style::default().fg(theme.fg).bg(theme.surface),
+        style: sheet.style(StyleClass::Surface),
         child: Box::new(Element::text(rows)),
     })
 }

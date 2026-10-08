@@ -2,11 +2,10 @@
 //! style). Current buffer highlighted, modified buffers marked.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// One buffer tab, projected for display.
 pub struct BufferTab {
@@ -15,12 +14,9 @@ pub struct BufferTab {
     pub current: bool,
 }
 
-pub fn view(tabs: &[BufferTab], _area: Rect, theme: &Theme) -> Element {
-    let bar = Style::default().fg(theme.comment).bg(theme.statusline);
-    let current_style = Style::default()
-        .fg(theme.fg)
-        .bg(theme.selection)
-        .add_modifier(Modifier::BOLD);
+pub fn view(tabs: &[BufferTab], _area: Rect, sheet: &Stylesheet) -> Element {
+    let bar = sheet.style(StyleClass::MutedOnBar);
+    let current_style = sheet.style(StyleClass::SelectedStrong);
 
     let mut spans: Vec<Span> = Vec::new();
     for tab in tabs {

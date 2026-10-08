@@ -63,7 +63,7 @@ impl Layer for SearchPrompt {
                 input: self.input.clone(),
             },
             area,
-            &app.theme.current,
+            &app.theme.sheet(),
         )
     }
 

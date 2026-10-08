@@ -5,7 +5,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// Centered rect of `percent_x`/`percent_y` within `area`.
 fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
@@ -25,13 +25,13 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 }
 
 /// An opaque, centered floating box with a title.
-fn float_box(title: &str, lines: Vec<Line<'static>>, area: Rect, theme: &Theme) -> Element {
+fn float_box(title: &str, lines: Vec<Line<'static>>, area: Rect, sheet: &Stylesheet) -> Element {
     Element::fixed(
         centered(area, 50, 30),
         Element::cleared(Element::Bordered {
             title: Some(Line::from(format!(" {title} "))),
-            border_style: Style::default().fg(theme.comment),
-            style: Style::default().fg(theme.fg).bg(theme.surface),
+            border_style: sheet.style(StyleClass::Muted),
+            style: sheet.style(StyleClass::Surface),
             child: Box::new(Element::Text {
                 lines,
                 style: Style::default(),
@@ -42,22 +42,22 @@ fn float_box(title: &str, lines: Vec<Line<'static>>, area: Rect, theme: &Theme) 
 }
 
 /// Simple message dialog body.
-pub fn dialog_view(title: &str, body: &str, area: Rect, theme: &Theme) -> Element {
+pub fn dialog_view(title: &str, body: &str, area: Rect, sheet: &Stylesheet) -> Element {
     float_box(
         title,
         body.lines().map(|l| Line::from(l.to_owned())).collect(),
         area,
-        theme,
+        sheet,
     )
 }
 
 /// Yes/no confirm dialog body (`message` + key hints).
-pub fn confirm_view(title: &str, message: &str, area: Rect, theme: &Theme) -> Element {
+pub fn confirm_view(title: &str, message: &str, area: Rect, sheet: &Stylesheet) -> Element {
     let body = format!("{message}\n\n[y] yes   [n] no");
     float_box(
         title,
         body.lines().map(|l| Line::from(l.to_owned())).collect(),
         area,
-        theme,
+        sheet,
     )
 }

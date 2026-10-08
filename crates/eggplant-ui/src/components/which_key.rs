@@ -2,11 +2,10 @@
 //! showing the keys available under the current prefix.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// One available key: the char to press + what it does.
 pub struct KeyHint {
@@ -21,14 +20,12 @@ pub struct WhichKeyProps {
     pub hints: Vec<KeyHint>,
 }
 
-pub fn view(props: &WhichKeyProps, _area: Rect, theme: &Theme) -> Element {
-    let key_style = Style::default()
-        .fg(theme.accent)
-        .add_modifier(Modifier::BOLD);
+pub fn view(props: &WhichKeyProps, _area: Rect, sheet: &Stylesheet) -> Element {
+    let key_style = sheet.emphasized(StyleClass::Accent);
     let mut spans = vec![
         Span::styled(
             format!(" {} ", props.path),
-            Style::default().fg(theme.accent_alt),
+            sheet.style(StyleClass::AccentAlt),
         ),
         Span::raw("→ "),
     ];
@@ -36,7 +33,7 @@ pub fn view(props: &WhichKeyProps, _area: Rect, theme: &Theme) -> Element {
         spans.push(Span::styled(format!("{} ", hint.key), key_style));
         spans.push(Span::styled(
             format!("{}   ", hint.description),
-            Style::default().fg(theme.comment),
+            sheet.style(StyleClass::Muted),
         ));
     }
 
@@ -51,7 +48,7 @@ pub fn view(props: &WhichKeyProps, _area: Rect, theme: &Theme) -> Element {
             Element::Empty,
             Element::cleared(Element::Text {
                 lines: vec![Line::from(spans)],
-                style: Style::default().fg(theme.fg).bg(theme.surface),
+                style: sheet.style(StyleClass::Surface),
                 wrap: false,
             }),
         ],

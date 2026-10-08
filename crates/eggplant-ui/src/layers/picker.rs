@@ -201,7 +201,7 @@ impl<T> Layer for Picker<T> {
                 preview: self.preview.as_ref(),
             },
             area,
-            &app.theme.current,
+            &app.theme.sheet(),
         )
     }
 

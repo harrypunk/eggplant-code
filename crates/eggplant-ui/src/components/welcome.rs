@@ -5,11 +5,10 @@
 //! Responsive: falls back to a plain title when the logo doesn't fit.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// ANSI-shadow block letters spelling EGGPLANT.
 const LOGO: &str = "\
@@ -30,32 +29,25 @@ pub struct WelcomeProps {
     pub version: &'static str,
 }
 
-pub fn view(props: &WelcomeProps, area: Rect, theme: &Theme) -> Element {
-    let accent = Style::default().fg(theme.accent);
-    let muted = Style::default().fg(theme.comment);
-
+pub fn view(props: &WelcomeProps, area: Rect, sheet: &Stylesheet) -> Element {
     let fits = area.width >= LOGO_WIDTH as u16 && area.height >= BLOCK_HEIGHT + 2;
     let mut lines: Vec<Line> = Vec::new();
     if fits {
         lines.extend(
             LOGO.lines()
-                .map(|l| Line::from(Span::styled(l.to_owned(), accent))),
+                .map(|l| Line::from(sheet.span(StyleClass::Accent, l.to_owned()))),
         );
     } else {
-        lines.push(Line::from(Span::styled(
-            "eggplant-code",
-            accent.add_modifier(Modifier::BOLD),
-        )));
+        lines.push(Line::from(sheet.span(StyleClass::Title, "eggplant-code")));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("v{}", props.version),
-        muted,
-    )));
+    lines.push(Line::from(
+        sheet.span(StyleClass::Muted, format!("v{}", props.version)),
+    ));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
+    lines.push(Line::from(sheet.span(
+        StyleClass::Muted,
         "C-e explorer  ·  Space commands  ·  C-S-p palette",
-        muted,
     )));
 
     // Center the block: width of the widest line, vertically centered.
@@ -75,7 +67,7 @@ pub fn view(props: &WelcomeProps, area: Rect, theme: &Theme) -> Element {
         // Paint the editor background so the screen isn't terminal-default.
         Element::Text {
             lines: vec![],
-            style: Style::default().bg(theme.bg),
+            style: sheet.fill(StyleClass::Text),
             wrap: false,
         },
         Element::fixed(block, Element::text(lines)),
@@ -93,7 +85,8 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                crate::element::paint(frame, view(props, area, &Theme::default()), area);
+                let theme = crate::theme::Theme::default();
+                crate::element::paint(frame, view(props, area, &Stylesheet::new(&theme)), area);
             })
             .unwrap();
         let buffer = terminal.backend().buffer();

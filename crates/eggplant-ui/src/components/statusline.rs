@@ -2,11 +2,10 @@
 
 use eggplant_core::Mode;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// Everything the statusline needs — nothing more.
 pub struct StatuslineProps {
@@ -22,11 +21,11 @@ pub struct StatuslineProps {
     pub focused_layer: Option<&'static str>,
 }
 
-pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
-    let mode_bg = match props.mode {
-        Mode::Normal => theme.mode_normal,
-        Mode::Insert => theme.mode_insert,
-        Mode::Visual | Mode::VisualLine => theme.accent_alt,
+pub fn view(props: &StatuslineProps, area: Rect, sheet: &Stylesheet) -> Element {
+    let mode_class = match props.mode {
+        Mode::Normal => StyleClass::ModeNormal,
+        Mode::Insert => StyleClass::ModeInsert,
+        Mode::Visual | Mode::VisualLine => StyleClass::ModeVisual,
     };
     let modified = if props.modified { " [+]" } else { "" };
     let name = props.buffer_name.clone().unwrap_or_default();
@@ -52,28 +51,17 @@ pub fn view(props: &StatuslineProps, area: Rect, theme: &Theme) -> Element {
         String::new()
     };
     let line = Line::from(vec![
-        Span::styled(
-            format!(" {} ", props.mode),
-            Style::default()
-                .fg(theme.bg)
-                .bg(mode_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(format!(" {} ", props.mode), sheet.style(mode_class)),
         Span::raw(name_span),
-        Span::styled(focus_tag, Style::default().fg(theme.accent_alt)),
+        Span::styled(focus_tag, sheet.style(StyleClass::AccentAlt)),
         Span::raw(" ".repeat(padding)),
-        Span::styled(
-            pending,
-            Style::default()
-                .fg(theme.accent_alt)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(pending, sheet.emphasized(StyleClass::AccentAlt)),
         Span::raw(right),
     ]);
 
     Element::Text {
         lines: vec![line],
-        style: Style::default().fg(theme.fg).bg(theme.statusline),
+        style: sheet.style(StyleClass::Bar),
         wrap: false,
     }
 }

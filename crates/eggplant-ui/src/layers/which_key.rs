@@ -42,7 +42,7 @@ impl Layer for WhichKey {
             .chain(self.path.iter().map(char::to_string))
             .collect::<Vec<_>>()
             .join(" ");
-        which_key::view(&WhichKeyProps { path, hints }, area, &app.theme.current)
+        which_key::view(&WhichKeyProps { path, hints }, area, &app.theme.sheet())
     }
 
     fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {

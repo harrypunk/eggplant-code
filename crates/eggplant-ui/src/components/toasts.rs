@@ -1,12 +1,11 @@
 //! Notification toasts — stacked top-right, above all layers.
 
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 
 use crate::element::Element;
 use crate::layers::notification::Level;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 const WIDTH: u16 = 40;
 const HEIGHT: u16 = 3;
@@ -20,15 +19,15 @@ pub struct ToastProps {
     pub level: Level,
 }
 
-fn level_color(level: Level, theme: &Theme) -> ratatui::style::Color {
+fn level_class(level: Level) -> StyleClass {
     match level {
-        Level::Info => theme.info,
-        Level::Warn => theme.warn,
-        Level::Error => theme.error,
+        Level::Info => StyleClass::Info,
+        Level::Warn => StyleClass::Warn,
+        Level::Error => StyleClass::Error,
     }
 }
 
-pub fn view(toasts: &[ToastProps], area: Rect, theme: &Theme) -> Element {
+pub fn view(toasts: &[ToastProps], area: Rect, sheet: &Stylesheet) -> Element {
     let hidden = toasts.len().saturating_sub(MAX_VISIBLE);
     let mut children: Vec<Element> = Vec::new();
 
@@ -42,7 +41,7 @@ pub fn view(toasts: &[ToastProps], area: Rect, theme: &Theme) -> Element {
             ),
             Element::Text {
                 lines: vec![Line::from(format!("+{hidden} earlier"))],
-                style: Style::default().fg(theme.comment),
+                style: sheet.style(StyleClass::Muted),
                 wrap: false,
             },
         ));
@@ -66,10 +65,8 @@ pub fn view(toasts: &[ToastProps], area: Rect, theme: &Theme) -> Element {
                 rect,
                 Element::cleared(Element::Bordered {
                     title: None,
-                    border_style: Style::default()
-                        .fg(level_color(toast.level, theme))
-                        .add_modifier(Modifier::BOLD),
-                    style: Style::default().fg(theme.fg).bg(theme.surface),
+                    border_style: sheet.emphasized(level_class(toast.level)),
+                    style: sheet.style(StyleClass::Surface),
                     child: Box::new(Element::text(vec![Line::from(toast.message.clone())])),
                 }),
             )

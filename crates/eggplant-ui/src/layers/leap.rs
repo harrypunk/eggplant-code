@@ -119,7 +119,7 @@ impl Layer for LeapLayer {
                 input: pattern.to_owned(),
             },
             area,
-            &app.theme.current,
+            &app.theme.sheet(),
         )
     }
 

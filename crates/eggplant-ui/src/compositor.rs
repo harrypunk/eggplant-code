@@ -333,7 +333,7 @@ impl Compositor {
                         solution.statusline,
                         statusline::view(app, focused_id, solution.statusline),
                     ),
-                    app.notifications.view(area, &app.theme.current),
+                    app.notifications.view(area, &app.theme.sheet()),
                 ])
                 .collect(),
         );

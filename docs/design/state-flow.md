@@ -174,12 +174,16 @@ one roof.
    callbacks; `editing::resolve` is pure (pending travels as data).
 2. ✅ **Absorbed** in step 1 (one atomic migration beats two interim
    shapes).
-3. **Stylesheet extraction** (next branch) — mechanical, one component at a time:
-   replace `Style::default().fg(theme.x)` with `StyleClass::X` spans;
-   components stop importing `Theme`. Land `stylesheet.rs` first with the
-   full current mapping so behavior doesn't change mid-flight.
-4. **Statusline/topbar/compositor chrome** — last, they're the most
-   style-dense.
+3. ✅ **Stylesheet** — landed as `stylesheet.rs`: `StyleClass` (the
+   semantic vocabulary) + `Stylesheet` (a component's styling handle —
+   its theme field is *private*, so naming a concrete color from a
+   component is a compile error). Components resolve classes through the
+   sheet's `style()`/`span()`/`emphasized()`/`fill()`/`bg()`; editor text
+   cells (compositional: syntax × selection/search backgrounds) compose
+   the sheet's values with `patch()` — precedence in the component, color
+   values only in the stylesheet. Layers pass `&app.theme.sheet()`.
+4. ✅ Chrome came along in the same pass (statusline, topbar, toasts) —
+   one mechanical sweep was cleaner than a half-migrated tree.
 
 ## Testing seams this buys
 

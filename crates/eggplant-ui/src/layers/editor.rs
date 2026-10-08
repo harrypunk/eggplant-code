@@ -94,7 +94,7 @@ impl EditorSurface {
 impl Layer for EditorSurface {
     fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
         if !app.editor.has_buffer() {
-            return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme.current);
+            return welcome::view(&WelcomeProps { version: VERSION }, area, &app.theme.sheet());
         }
         let width = self.text_width(app);
         let line_count = app.editor.display_line_count();
@@ -135,7 +135,7 @@ impl Layer for EditorSurface {
                 dim: app.dims_editor_text(),
             },
             area,
-            &app.theme.current,
+            &app.theme.sheet(),
         )
     }
 

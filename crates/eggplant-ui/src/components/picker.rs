@@ -8,12 +8,11 @@
 //! with `Element::Input`.
 
 use ratatui::layout::{Constraint, Direction, Rect};
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::components::preview::{self, PreviewProps};
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// One item, projected for display (pre-filtered by the container).
 pub struct PickerItem {
@@ -71,10 +70,10 @@ fn centered(panel: Element, horizontal: [u16; 3], vertical: Vec<Constraint>) -> 
     }
 }
 
-pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
-    let base = Style::default().fg(theme.fg).bg(theme.surface);
+pub fn view(props: &PickerProps, area: Rect, sheet: &Stylesheet) -> Element {
+    let base = sheet.style(StyleClass::Surface);
     let input = Element::Input {
-        prompt: Line::from(Span::styled("> ", Style::default().fg(theme.accent))),
+        prompt: Line::from(sheet.span(StyleClass::Accent, "> ")),
         text: props.input.clone(),
         style: base,
     };
@@ -87,16 +86,13 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
             // Contrast-safe on both plain and selected rows.
             let (id_style, desc_style) = if i == props.selected {
                 (
-                    Style::default()
-                        .fg(theme.fg)
-                        .bg(theme.selection)
-                        .add_modifier(Modifier::BOLD),
-                    Style::default().fg(theme.fg).bg(theme.selection),
+                    sheet.style(StyleClass::SelectedStrong),
+                    sheet.style(StyleClass::Selected),
                 )
             } else {
                 (
-                    Style::default().fg(theme.fg),
-                    Style::default().fg(theme.comment),
+                    sheet.style(StyleClass::Text),
+                    sheet.style(StyleClass::Muted),
                 )
             };
             Line::from(vec![
@@ -130,8 +126,8 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
             ],
             children: vec![
                 list,
-                Element::VRule(Style::default().fg(theme.comment)),
-                preview::view(preview, area, theme),
+                Element::VRule(sheet.style(StyleClass::Muted)),
+                preview::view(preview, area, sheet),
             ],
         },
         None => list,
@@ -139,7 +135,7 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
 
     let panel = Element::cleared(Element::Bordered {
         title: Some(Line::from(format!(" {} ", props.title))),
-        border_style: Style::default().fg(theme.accent),
+        border_style: sheet.style(StyleClass::Accent),
         style: base,
         child: Box::new(body),
     });
@@ -171,6 +167,7 @@ pub fn view(props: &PickerProps, area: Rect, theme: &Theme) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -192,7 +189,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                crate::element::paint(frame, view(&props, area, &theme), area);
+                crate::element::paint(frame, view(&props, area, &Stylesheet::new(&theme)), area);
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
@@ -234,7 +231,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                crate::element::paint(frame, view(&props, area, &theme), area);
+                crate::element::paint(frame, view(&props, area, &Stylesheet::new(&theme)), area);
             })
             .unwrap();
         let buffer = terminal.backend().buffer();

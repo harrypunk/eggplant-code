@@ -12,7 +12,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// One visible document line: highlighted spans + optional visual selection
 /// as char columns `[start, end)`, plus search marks `(start, end,
@@ -52,7 +52,7 @@ pub struct RowProps {
 /// search marks, leap chips), returning `(char, style)` cells. Slicing
 /// happens later — decorations must be computed on full-line columns.
 /// Shared with the preview pane (one styling implementation).
-pub(crate) fn style_cells(line: &EditorLine, dim: bool, theme: &Theme) -> Vec<(char, Style)> {
+pub(crate) fn style_cells(line: &EditorLine, dim: bool, sheet: &Stylesheet) -> Vec<(char, Style)> {
     let cells: Vec<(char, Option<eggplant_core::SyntaxScope>)> = line
         .spans
         .iter()
@@ -66,19 +66,17 @@ pub(crate) fn style_cells(line: &EditorLine, dim: bool, theme: &Theme) -> Vec<(c
         line.search_marks
             .iter()
             .find(|(start, end, _)| (*start..*end).contains(&col))
-            .map(|(_, _, current)| {
-                if *current {
-                    theme.search_current
+            .and_then(|(_, _, current)| {
+                sheet.bg(if *current {
+                    StyleClass::SearchCurrent
                 } else {
-                    theme.search_match
-                }
+                    StyleClass::SearchMatch
+                })
             })
     };
 
-    let label_style = Style::default()
-        .fg(theme.bg)
-        .bg(theme.accent)
-        .add_modifier(ratatui::style::Modifier::BOLD);
+    let label_style = sheet.style(StyleClass::Chip);
+    let selection_bg = sheet.bg(StyleClass::Selected);
 
     cells
         .iter()
@@ -91,14 +89,14 @@ pub(crate) fn style_cells(line: &EditorLine, dim: bool, theme: &Theme) -> Vec<(c
             // Leap mode dims all other text; search marks and selection are
             // superseded.
             let style = if dim {
-                theme.scope_style(*scope).fg(theme.comment)
+                sheet.style(StyleClass::SyntaxDim(*scope))
             } else {
-                let mut style = theme.scope_style(*scope);
+                let mut style = sheet.style(StyleClass::Syntax(*scope));
                 if let Some(bg) = search_bg(col) {
                     style = style.bg(bg);
                 }
                 if selected(col) {
-                    style = style.bg(theme.selection);
+                    style = style.bg(selection_bg.unwrap_or_default());
                 }
                 style
             };
@@ -138,11 +136,11 @@ pub fn gutter_width(line_count: usize) -> usize {
     line_count.max(1).ilog10() as usize + 2
 }
 
-pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
+pub fn view(props: &EditorProps, area: Rect, sheet: &Stylesheet) -> Element {
     let gutter_width = gutter_width(props.line_count);
     let text_width = (area.width as usize).saturating_sub(gutter_width).max(1);
     let (cursor_line, cursor_col) = props.cursor;
-    let base = Style::default().fg(theme.fg).bg(theme.bg);
+    let base = sheet.style(StyleClass::Text);
 
     let gutter: Vec<Line> = props
         .rows
@@ -151,19 +149,19 @@ pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
             let (text, style) = match row.gutter {
                 GutterMark::Number(n) => {
                     let style = if n == cursor_line {
-                        base.fg(theme.accent_alt)
+                        base.patch(sheet.style(StyleClass::AccentAlt))
                     } else {
-                        base.fg(theme.comment)
+                        base.patch(sheet.style(StyleClass::Muted))
                     };
                     (format!("{:>w$} ", n + 1, w = gutter_width - 1), style)
                 }
                 GutterMark::Continuation => (
                     format!("{:<w$} ", "↳", w = gutter_width - 1),
-                    base.fg(theme.comment),
+                    base.patch(sheet.style(StyleClass::Muted)),
                 ),
                 GutterMark::PastEnd => (
                     format!("{:<w$} ", "~", w = gutter_width - 1),
-                    base.fg(theme.comment),
+                    base.patch(sheet.style(StyleClass::Muted)),
                 ),
             };
             Line::from(Span::styled(text, style))
@@ -174,7 +172,7 @@ pub fn view(props: &EditorProps, area: Rect, theme: &Theme) -> Element {
         .rows
         .iter()
         .map(|row| {
-            let cells = style_cells(&row.line, props.dim, theme);
+            let cells = style_cells(&row.line, props.dim, sheet);
             spans_from(&slice_segment(&cells, row.start_col, text_width))
         })
         .collect();
@@ -249,6 +247,7 @@ impl RowProps {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
     use eggplant_core::SyntaxScope;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -259,7 +258,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                crate::element::paint(frame, view(props, area, &theme), area);
+                crate::element::paint(frame, view(props, area, &Stylesheet::new(&theme)), area);
             })
             .unwrap();
         terminal.backend().buffer().clone()

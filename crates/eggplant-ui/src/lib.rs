@@ -18,6 +18,7 @@ pub mod layers;
 pub mod runner;
 pub mod startup;
 pub mod statusline;
+pub mod stylesheet;
 pub mod terminal;
 pub mod theme;
 pub mod topbar;

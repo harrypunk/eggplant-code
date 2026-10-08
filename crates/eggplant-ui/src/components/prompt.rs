@@ -1,11 +1,10 @@
 //! The search prompt: a single input row pinned to the bottom (vim `/`).
 
 use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// Everything the prompt needs — nothing more.
 pub struct PromptProps {
@@ -14,9 +13,9 @@ pub struct PromptProps {
     pub input: String,
 }
 
-pub fn view(props: &PromptProps, area: Rect, theme: &Theme) -> Element {
+pub fn view(props: &PromptProps, area: Rect, sheet: &Stylesheet) -> Element {
     let _ = area;
-    let base = Style::default().fg(theme.fg).bg(theme.surface);
+    let base = sheet.style(StyleClass::Surface);
     // Bottom row, declaratively: spacer takes everything above it.
     Element::Layout {
         direction: ratatui::layout::Direction::Vertical,
@@ -27,7 +26,7 @@ pub fn view(props: &PromptProps, area: Rect, theme: &Theme) -> Element {
         children: vec![
             Element::Empty,
             Element::cleared(Element::Input {
-                prompt: Line::from(Span::styled(props.label, Style::default().fg(theme.accent))),
+                prompt: Line::from(sheet.span(StyleClass::Accent, props.label)),
                 text: props.input.clone(),
                 style: base,
             }),

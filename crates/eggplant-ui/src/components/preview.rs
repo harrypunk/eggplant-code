@@ -4,14 +4,13 @@
 //! highlighting for free. Pure props → Element.
 
 use ratatui::layout::{Constraint, Direction, Rect};
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use eggplant_core::HighlightedSpan;
 
 use crate::components::editor::{EditorLine, spans_from, style_cells};
 use crate::element::Element;
-use crate::theme::Theme;
+use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// One context row: highlighted spans (from a core `Peek`) plus the
 /// match band on the focus row.
@@ -32,8 +31,8 @@ pub struct PreviewProps {
     pub focus_row: usize,
 }
 
-pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
-    let base = Style::default().fg(theme.fg).bg(theme.bg);
+pub fn view(props: &PreviewProps, _area: Rect, sheet: &Stylesheet) -> Element {
+    let base = sheet.style(StyleClass::Text);
     let number_width = (props.first_line + props.rows.len()).max(1).ilog10() as usize + 1;
 
     let rows: Vec<Line> = props
@@ -42,9 +41,9 @@ pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
         .enumerate()
         .map(|(i, row)| {
             let number_style = if i == props.focus_row {
-                base.fg(theme.accent_alt)
+                base.patch(sheet.style(StyleClass::AccentAlt))
             } else {
-                base.fg(theme.comment)
+                base.patch(sheet.style(StyleClass::Muted))
             };
             let mut spans = vec![Span::styled(
                 format!(" {:>w$} │ ", props.first_line + i + 1, w = number_width),
@@ -59,7 +58,7 @@ pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
                     labels: Vec::new(),
                 },
                 false,
-                theme,
+                sheet,
             );
             spans.extend(spans_from(&cells).spans);
             Line::from(spans)
@@ -75,9 +74,7 @@ pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
             Element::Text {
                 lines: vec![Line::from(Span::styled(
                     format!(" {} ", props.title),
-                    Style::default()
-                        .fg(theme.accent)
-                        .add_modifier(Modifier::BOLD),
+                    sheet.style(StyleClass::Title),
                 ))],
                 style: base,
                 wrap: false,
@@ -94,6 +91,7 @@ pub fn view(props: &PreviewProps, _area: Rect, theme: &Theme) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::Theme;
     use eggplant_core::SyntaxScope;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -126,7 +124,7 @@ mod tests {
         terminal
             .draw(|frame| {
                 let area = frame.area();
-                crate::element::paint(frame, view(&props, area, &theme), area);
+                crate::element::paint(frame, view(&props, area, &Stylesheet::new(&theme)), area);
             })
             .unwrap();
         let buffer = terminal.backend().buffer();
