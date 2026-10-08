@@ -118,6 +118,25 @@ impl FileTree {
         rows
     }
 
+    /// Expand every ancestor directory of `path` so it becomes visible
+    /// (buffer-sync reveal). Idempotent. Returns `Ok(false)` when `path`
+    /// isn't under the root (nothing to reveal), `Err` on listing I/O.
+    pub fn expand_to(&mut self, path: &Path) -> io::Result<bool> {
+        let Ok(rel) = path.strip_prefix(&self.root) else {
+            return Ok(false);
+        };
+        let mut dir = self.root.clone();
+        // All components but the file name are ancestor directories.
+        for component in rel
+            .components()
+            .take(rel.components().count().saturating_sub(1))
+        {
+            dir.push(component);
+            self.expand(&dir)?;
+        }
+        Ok(true)
+    }
+
     /// Expand a collapsed directory, loading its listing on first use.
     pub fn expand(&mut self, dir: &Path) -> io::Result<()> {
         if self.expanded.contains(dir) {
@@ -153,6 +172,35 @@ impl FileTree {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn expand_to_reveals_nested_file_and_ignores_outsiders() {
+        let root = std::env::temp_dir().join(format!("eggplant-expand-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("a/b/c.txt"), "c").unwrap();
+        let outside = std::env::temp_dir().join(format!("outside-{}.txt", std::process::id()));
+        std::fs::write(&outside, "x").unwrap();
+
+        let ignores = crate::files::IgnoreRules::new(&root, &[]);
+        let mut tree = FileTree::new(root.clone(), fs_lister).unwrap();
+        assert_eq!(tree.rows(&ignores, false).len(), 1, "collapsed: only a/");
+
+        assert!(tree.expand_to(&root.join("a/b/c.txt")).unwrap());
+        let names: Vec<String> = tree
+            .rows(&ignores, false)
+            .iter()
+            .map(|row| row.name.clone())
+            .collect();
+        assert_eq!(names, vec!["a", "b", "c.txt"], "ancestors expanded");
+
+        assert!(
+            !tree.expand_to(&outside).unwrap(),
+            "outside root: nothing to reveal"
+        );
+        std::fs::remove_dir_all(root).ok();
+        std::fs::remove_file(outside).ok();
+    }
+
     use super::*;
 
     /// In-memory filesystem: root has a_dir/{a1,a2}, z_dir/, b.txt.

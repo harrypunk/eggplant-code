@@ -12,7 +12,7 @@ use eggplant_core::input::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 
-use crate::action::{AppAction, Handled};
+use crate::action::{ActionEvent, AppAction, Handled};
 use crate::app::App;
 use crate::commands::{Command, CommandKind};
 use crate::element::{self, Element};
@@ -58,6 +58,12 @@ pub trait Layer {
     /// with the layer's resolved area. Update viewport-dependent state here
     /// (scroll windows, page sizes) — `render` itself must stay pure (Rule 5).
     fn resize(&mut self, _area: Rect, _app: &App) {}
+
+    /// React to a dispatched action (the subscription channel): called for
+    /// every layer after each action is applied. Layers sync themselves to
+    /// shared-state changes they care about (the explorer reveals the
+    /// current buffer on `BufferChanged`). Default: ignore.
+    fn observe(&mut self, _event: ActionEvent, _app: &App) {}
 
     /// How this layer participates in layout.
     fn kind(&self) -> LayerKind;
@@ -159,6 +165,11 @@ pub struct Compositor {
 impl Compositor {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Mutable access to the layer stack (the action broadcast).
+    pub(crate) fn layers_mut(&mut self) -> impl Iterator<Item = &mut Box<dyn Layer>> {
+        self.layers.iter_mut()
     }
 
     pub fn push(&mut self, layer: Box<dyn Layer>) {

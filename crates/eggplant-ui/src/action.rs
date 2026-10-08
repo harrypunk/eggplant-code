@@ -95,6 +95,31 @@ pub enum AppAction {
     Quit,
 }
 
+/// A fact about a dispatched action, broadcast to every layer after
+/// dispatch (the subscription channel — redux middleware-style). Kept
+/// minimal: payloads live in `App` state; observers read the truth from
+/// there, so a failed `OpenBuffer` never misleads anyone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionEvent {
+    /// The current buffer changed (opened, switched, closed).
+    BufferChanged,
+    /// Anything else — the default; observers ignore it.
+    Other,
+}
+
+impl ActionEvent {
+    /// Derive the broadcast fact from an action (before it's consumed).
+    fn of(action: &AppAction) -> Self {
+        match action {
+            AppAction::OpenBuffer { .. }
+            | AppAction::NextBuffer
+            | AppAction::PrevBuffer
+            | AppAction::CloseCurrentBuffer => Self::BufferChanged,
+            _ => Self::Other,
+        }
+    }
+}
+
 /// Outcome of dispatching a key to a layer.
 pub enum Handled {
     /// The layer didn't handle the key; pass it on (e.g. to the global
@@ -123,6 +148,17 @@ impl Compositor {
     /// (`None` for commands from the global keymap) — `CloseSelf` resolves
     /// against it.
     pub fn dispatch(&mut self, action: AppAction, emitter: Option<&str>, app: &mut App) {
+        let event = ActionEvent::of(&action);
+        self.apply(action, emitter, app);
+        // Broadcast the fact: observers (the explorer's buffer sync, …)
+        // react to shared-state changes without dispatch knowing them.
+        for layer in self.layers_mut() {
+            layer.observe(event, app);
+        }
+    }
+
+    /// Apply one action's effects. Public only for `action.rs`'s impl.
+    fn apply(&mut self, action: AppAction, emitter: Option<&str>, app: &mut App) {
         match action {
             AppAction::Notify { level, message } => {
                 app.notifications

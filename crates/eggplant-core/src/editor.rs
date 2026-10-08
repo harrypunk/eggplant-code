@@ -1312,6 +1312,14 @@ impl Editor {
     // ---- introspection for status line ----
 
     /// Current buffer name; `None` when no buffer is open.
+    /// Absolute path of the current buffer's backing file; `None` for
+    /// scratch buffers / no buffer (buffer-sync observers read this).
+    pub fn current_path(&self) -> Option<std::path::PathBuf> {
+        let doc = self.doc_opt()?;
+        let path = doc.path()?;
+        Some(path.to_path_buf())
+    }
+
     pub fn display_name(&self) -> Option<String> {
         let doc = self.doc_opt()?;
         Some(

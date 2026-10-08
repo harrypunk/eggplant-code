@@ -8,10 +8,10 @@ use eggplant_core::input::KeyEvent;
 #[cfg(test)]
 use eggplant_core::input::{KeyCode, KeyModifiers};
 
-use crate::action::AppAction;
+use crate::action::{ActionEvent, AppAction};
 use crate::app::App;
 use crate::app::Leap;
-use crate::compositor::FocusDirection;
+use crate::compositor::{FocusDirection, Layer};
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::file_picker;
 use crate::layers::files_panel::{self, FilesPanel};
@@ -407,7 +407,11 @@ fn toggle_files_panel(_: &App) -> Vec<AppAction> {
         id: files_panel::PANEL_ID,
         make: |app| {
             FilesPanel::new(app.workspace.root.clone())
-                .map(|panel| Box::new(panel) as Box<dyn crate::compositor::Layer>)
+                .map(|mut panel| {
+                    // Open already-synced: reveal the current buffer's file.
+                    panel.observe(ActionEvent::BufferChanged, app);
+                    Box::new(panel) as Box<dyn crate::compositor::Layer>
+                })
                 .map_err(|err| format!("files panel: {err}"))
         },
     }]

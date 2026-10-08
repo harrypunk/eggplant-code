@@ -17,7 +17,7 @@ use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
-use crate::action::{AppAction, Handled};
+use crate::action::{ActionEvent, AppAction, Handled};
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::components::files_panel::{self, FilesPanelProps, RowKind, RowProps};
@@ -198,6 +198,23 @@ impl FilesPanel {
         }
     }
 
+    /// Sync to the workspace truth: expand the current buffer's ancestors
+    /// and select its row (buffer-sync — the subscription to
+    /// `ActionEvent::BufferChanged`). Quiet no-op when there's no buffer,
+    /// the file is outside the root, or the row isn't visible under the
+    /// current ignore filter.
+    fn reveal_current_buffer(&mut self, app: &App) {
+        let Some(path) = app.editor.current_path() else {
+            return;
+        };
+        if self.tree.expand_to(&path).unwrap_or(false)
+            && let Some(index) = self.rows(app).iter().position(|row| row.path == path)
+        {
+            self.selected = index;
+            self.ensure_selection_visible();
+        }
+    }
+
     fn open_selected(&mut self, app: &App) -> Handled {
         let Some(row) = self.selected_row(app) else {
             return Handled::quiet();
@@ -296,6 +313,12 @@ impl Layer for FilesPanel {
         }
     }
 
+    fn observe(&mut self, event: ActionEvent, app: &App) {
+        if event == ActionEvent::BufferChanged {
+            self.reveal_current_buffer(app);
+        }
+    }
+
     fn resize(&mut self, area: Rect, _app: &App) {
         let inner = Block::default().borders(Borders::ALL).inner(area);
         self.inner_height = inner.height as usize;
@@ -370,6 +393,30 @@ mod tests {
         panel.collapse_or_parent(&app);
         assert_eq!(panel.selected, 0);
         assert_eq!(panel.rows(&app).len(), 3);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn buffer_open_reveals_and_selects_the_file() {
+        let (root, mut app, mut panel) = test_tree();
+        assert_eq!(panel.selected, 0, "starts at the first row");
+
+        // Open a nested file "through the picker" (any path: they all
+        // funnel through OpenBuffer → BufferChanged).
+        app.editor.open_buffer(root.join("a_dir/a2.txt")).unwrap();
+        panel.observe(crate::action::ActionEvent::BufferChanged, &app);
+
+        let rows = panel.rows(&app);
+        assert!(
+            rows.iter().any(|row| row.name == "a2.txt"),
+            "a_dir expanded to reveal the file"
+        );
+        assert_eq!(rows[panel.selected].name, "a2.txt", "file selected");
+
+        // An unrelated event doesn't move the selection.
+        panel.observe(crate::action::ActionEvent::Other, &app);
+        assert_eq!(panel.rows(&app)[panel.selected].name, "a2.txt");
+
         fs::remove_dir_all(root).unwrap();
     }
 
