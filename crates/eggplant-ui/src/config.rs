@@ -321,14 +321,15 @@ mod tests {
         // the keymap falls back to defaults and a warning is raised
         assert_eq!(
             eggplant_core::editing::resolve(
-                &mut Default::default(),
+                &Default::default(),
                 Mode::Normal,
                 eggplant_core::input::KeyEvent::new(
                     eggplant_core::input::KeyCode::Char(';'),
                     eggplant_core::input::KeyModifiers::NONE
                 ),
                 &app.input.keymaps
-            ),
+            )
+            .1,
             eggplant_core::editing::Resolved::Ignored
         );
     }

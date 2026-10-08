@@ -38,8 +38,9 @@ impl PendingKey {
 }
 
 /// Pending modal input: count prefix and armed operator + its count.
-/// Kept in `App` (the statusline's showcmd-style hint reads it).
-#[derive(Debug, Default)]
+/// `Copy`: `resolve` is pure — it takes a snapshot and returns the next
+/// state alongside the resolution (the action-flow contract).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PendingState {
     pub count: Option<usize>,
     pub key: Option<(PendingKey, usize)>,
@@ -531,16 +532,19 @@ fn plain_char(key: &KeyEvent) -> Option<char> {
 
 /// The modal input state machine: fold a keypress (plus pending state) into
 /// a resolution. Counts and armed operators live here and nowhere else.
+/// Pure: `(pending, mode, key, keymaps) → (next pending, resolution)`.
+/// The caller stores the returned `PendingState` (via an action) — resolve
+/// itself touches nothing.
 pub fn resolve(
-    pending: &mut PendingState,
+    pending: &PendingState,
     mode: Mode,
     key: KeyEvent,
     keymaps: &Keymaps,
-) -> Resolved {
+) -> (PendingState, Resolved) {
     match mode {
-        Mode::Insert => resolve_insert(keymaps, key),
-        Mode::Normal => resolve_modal(pending, Mode::Normal, key, keymaps),
-        Mode::Visual | Mode::VisualLine => resolve_modal(pending, Mode::Visual, key, keymaps),
+        Mode::Insert => (*pending, resolve_insert(keymaps, key)),
+        Mode::Normal => resolve_modal(*pending, Mode::Normal, key, keymaps),
+        Mode::Visual | Mode::VisualLine => resolve_modal(*pending, Mode::Visual, key, keymaps),
     }
 }
 
@@ -557,6 +561,17 @@ fn resolve_insert(keymaps: &Keymaps, key: KeyEvent) -> Resolved {
 /// Normal and visual share the machinery; `Mode` picks the keymap and
 /// whether `d`/`y` arm operators (visual binds them directly).
 fn resolve_modal(
+    pending: PendingState,
+    mode: Mode,
+    key: KeyEvent,
+    keymaps: &Keymaps,
+) -> (PendingState, Resolved) {
+    let mut pending = pending;
+    let resolved = resolve_modal_inner(&mut pending, mode, key, keymaps);
+    (pending, resolved)
+}
+
+fn resolve_modal_inner(
     pending: &mut PendingState,
     mode: Mode,
     key: KeyEvent,
@@ -654,7 +669,7 @@ mod tests {
         let mut pending = PendingState::default();
         let mut last = Resolved::Ignored;
         for c in keys.chars() {
-            last = resolve(&mut pending, Mode::Normal, key(c), &keymaps);
+            (pending, last) = resolve(&pending, Mode::Normal, key(c), &keymaps);
         }
         (last, pending)
     }
@@ -712,10 +727,10 @@ mod tests {
     #[test]
     fn zz_also_works_in_visual() {
         let keymaps = Keymaps::default();
-        let mut pending = PendingState::default();
-        resolve(&mut pending, Mode::Visual, key('z'), &keymaps);
+        let pending = PendingState::default();
+        let (pending, _) = resolve(&pending, Mode::Visual, key('z'), &keymaps);
         assert_eq!(pending.key, Some((PendingKey::View, 1)));
-        let resolved = resolve(&mut pending, Mode::Visual, key('z'), &keymaps);
+        let (_, resolved) = resolve(&pending, Mode::Visual, key('z'), &keymaps);
         assert_eq!(resolved, Resolved::View(ViewAction::CenterCursor));
     }
 
@@ -725,13 +740,13 @@ mod tests {
         let keymaps = Keymaps::default();
         let ctrl = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL);
 
-        let mut pending = PendingState::default();
-        let r = resolve(&mut pending, Mode::Normal, ctrl('f'), &keymaps);
+        let pending = PendingState::default();
+        let (_, r) = resolve(&pending, Mode::Normal, ctrl('f'), &keymaps);
         assert_eq!(r, Resolved::View(ViewAction::PageDown));
-        let r = resolve(&mut pending, Mode::Normal, ctrl('u'), &keymaps);
+        let (_, r) = resolve(&pending, Mode::Normal, ctrl('u'), &keymaps);
         assert_eq!(r, Resolved::View(ViewAction::PageUp));
         // Visual too, and no count semantics (a pending count is dropped).
-        let r = resolve(&mut pending, Mode::Visual, ctrl('f'), &keymaps);
+        let (_, r) = resolve(&pending, Mode::Visual, ctrl('f'), &keymaps);
         assert_eq!(r, Resolved::View(ViewAction::PageDown));
     }
 
@@ -753,16 +768,12 @@ mod tests {
     #[test]
     fn visual_binds_operator_keys_directly() {
         let keymaps = Keymaps::default();
-        let mut pending = PendingState::default();
-        assert_eq!(
-            resolve(&mut pending, Mode::Visual, key('d'), &keymaps),
-            Resolved::Act(EditorAction::DeleteSelection, 1)
-        );
+        let pending = PendingState::default();
+        let (pending, resolved) = resolve(&pending, Mode::Visual, key('d'), &keymaps);
+        assert_eq!(resolved, Resolved::Act(EditorAction::DeleteSelection, 1));
         assert_eq!(pending.key, None, "visual d never arms");
-        assert_eq!(
-            resolve(&mut pending, Mode::VisualLine, key('v'), &keymaps),
-            Resolved::Act(EditorAction::VisualCharOrExit, 1)
-        );
+        let (_, resolved) = resolve(&pending, Mode::VisualLine, key('v'), &keymaps);
+        assert_eq!(resolved, Resolved::Act(EditorAction::VisualCharOrExit, 1));
     }
 
     #[test]
@@ -775,11 +786,9 @@ mod tests {
     #[test]
     fn insert_inserts_plain_chars() {
         let keymaps = Keymaps::default();
-        let mut pending = PendingState::default();
-        assert_eq!(
-            resolve(&mut pending, Mode::Insert, key('x'), &keymaps),
-            Resolved::Insert('x')
-        );
+        let pending = PendingState::default();
+        let (_, resolved) = resolve(&pending, Mode::Insert, key('x'), &keymaps);
+        assert_eq!(resolved, Resolved::Insert('x'));
     }
 
     // ---- interpret (against a minimal EditorCtx) ----
