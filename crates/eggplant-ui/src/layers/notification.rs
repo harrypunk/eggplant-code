@@ -41,6 +41,11 @@ impl Notification {
         Self::new(message, Level::Error)
     }
 
+    /// Construct at an explicit level (the action interpreter's path).
+    pub fn with_level(level: Level, message: impl Into<String>) -> Self {
+        Self::new(message, level)
+    }
+
     fn new(message: impl Into<String>, level: Level) -> Self {
         Self {
             message: message.into(),

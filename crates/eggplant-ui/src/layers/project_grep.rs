@@ -6,7 +6,8 @@ use eggplant_core::grep::{self, GrepHit};
 use crate::app::App;
 use crate::components::preview::{PreviewProps, PreviewRow};
 
-use super::picker::{Picker, PickerSource, PickerSpec, Select};
+use super::picker::{Picker, PickerSource, PickerSpec};
+use crate::action::AppAction;
 
 /// Context lines BEFORE the hit — the preview's scroll position.
 /// Below it, the file fills the pane (`budget` rows, the pane's real
@@ -27,7 +28,7 @@ pub fn project_grep(_app: &App) -> Picker<GrepHit> {
                 hit.text.trim().to_owned(),
             )
         },
-        on_select: |hit| Select::OpenAt {
+        on_select: |hit| AppAction::OpenBuffer {
             path: hit.abs.clone(),
             at: Some((hit.line, hit.cols.0)),
         },

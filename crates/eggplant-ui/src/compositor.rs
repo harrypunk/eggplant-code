@@ -12,35 +12,12 @@ use eggplant_core::input::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::commands::{Command, CommandKind};
 use crate::element::{self, Element};
 use crate::statusline;
 use crate::topbar;
-
-/// Result of dispatching a key to a layer.
-///
-/// Structural results (`Close`, `Unfocus`, `Push`) are handled by the
-/// compositor itself; `Execute` is an effect the compositor runs on the
-/// layer's behalf (layers can't touch the compositor directly).
-pub enum KeyResult {
-    /// The layer handled the key; stop propagation.
-    Consumed,
-    /// The layer didn't handle the key; pass it on (e.g. to global keys).
-    Ignored,
-    /// The layer asks the compositor to close (remove) it.
-    Close,
-    /// The layer asks the compositor to move focus back to the base layer.
-    Unfocus,
-    /// Close this layer *and* focus the base window: for layers whose
-    /// outcome navigates the buffer (file picker, grep) — the buffer owns
-    /// the result, so it owns the focus.
-    CloseUnfocus,
-    /// The layer asks the compositor to push a new layer (takes focus).
-    Push(Box<dyn Layer>),
-    /// Close this layer, then run a registry command.
-    Execute(Command),
-}
 
 /// Which side a panel docks against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,9 +46,12 @@ pub trait Layer {
     /// painting — the compositor paints the returned tree (Rule 5).
     fn view(&self, area: Rect, app: &App, focused: bool) -> Element;
 
-    /// Handle a key.
-    fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {
-        KeyResult::Ignored
+    /// Handle a key. **Read-only on shared state** (`&App`): the layer
+    /// mutates only its own local state and expresses every shared-state
+    /// change as returned actions (the state-flow contract — see
+    /// docs/design/state-flow.md).
+    fn handle_key(&mut self, _key: KeyEvent, _app: &App) -> Handled {
+        Handled::Ignored
     }
 
     /// Lifecycle hook called by the compositor each frame, before rendering,
@@ -284,48 +264,36 @@ impl Compositor {
         self.window_focus = 0;
     }
 
-    /// Send a key to the focused layer, applying any structural request or
-    /// effect (close/unfocus/push/execute/ex) it returns.
-    /// Execute a command: the single dispatch path for palette, which-key,
-    /// global keymap — and modal actions (`Edit` funnels into
-    /// `editing::interpret`, the same path modal keys use).
+    /// Execute a command: translate it to actions (pure — commands never
+    /// perform effects), then dispatch them. The single path for palette,
+    /// which-key, global keymap, and modal edit commands alike.
     pub fn execute(&mut self, command: Command, app: &mut App) {
-        match command.kind {
-            CommandKind::App(f) => f(app, self),
-            CommandKind::Edit(action) => eggplant_core::editing::interpret(action, 1, app),
+        let actions = match command.kind {
+            CommandKind::App(translate) => translate(app),
+            CommandKind::Edit(action) => vec![AppAction::Edit(action)],
+        };
+        for action in actions {
+            self.dispatch(action, None, app);
         }
     }
 
-    pub fn dispatch_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    /// Send a key to the focused layer, then dispatch the actions it
+    /// returns. The emitting layer's id is captured up front so
+    /// `CloseSelf` is robust against index shifts mid-batch.
+    pub fn dispatch_key(&mut self, key: KeyEvent, app: &mut App) -> Handled {
         let index = self.focused_index();
         let Some(layer) = self.layers.get_mut(index) else {
-            return KeyResult::Ignored;
+            return Handled::Ignored;
         };
-        let result = layer.handle_key(key, app);
-        match result {
-            KeyResult::Close => {
-                self.remove(index);
-                KeyResult::Consumed
+        let emitter = layer.id();
+        match layer.handle_key(key, app) {
+            Handled::Ignored => Handled::Ignored,
+            Handled::Acted(actions) => {
+                for action in actions {
+                    self.dispatch(action, Some(emitter), app);
+                }
+                Handled::Acted(Vec::new())
             }
-            KeyResult::Unfocus => {
-                self.unfocus();
-                KeyResult::Consumed
-            }
-            KeyResult::CloseUnfocus => {
-                self.remove(index);
-                self.unfocus();
-                KeyResult::Consumed
-            }
-            KeyResult::Push(layer) => {
-                self.push(layer);
-                KeyResult::Consumed
-            }
-            KeyResult::Execute(command) => {
-                self.remove(index);
-                self.execute(command, app);
-                KeyResult::Consumed
-            }
-            other => other,
         }
     }
 
@@ -462,8 +430,8 @@ mod tests {
             fn view(&self, _area: Rect, _app: &App, _focused: bool) -> Element {
                 Element::Empty
             }
-            fn handle_key(&mut self, _key: KeyEvent, _app: &mut App) -> KeyResult {
-                KeyResult::CloseUnfocus
+            fn handle_key(&mut self, _key: KeyEvent, _app: &App) -> Handled {
+                Handled::Acted(vec![AppAction::CloseSelf, AppAction::Unfocus])
             }
             fn kind(&self) -> LayerKind {
                 LayerKind::Float

@@ -10,8 +10,9 @@ use std::time::Duration;
 use crossterm::event::{self, Event};
 use ratatui::layout::Rect;
 
+use crate::action::Handled;
 use crate::app::App;
-use crate::compositor::{Compositor, KeyResult};
+use crate::compositor::Compositor;
 use crate::startup::{self, StartupTarget};
 use crate::terminal::{CrosstermTerminal, TerminalGuard};
 
@@ -141,7 +142,7 @@ fn translate_key(key: crossterm::event::KeyEvent) -> Option<eggplant_core::input
 /// Key routing: the focused layer gets the key first (modal layers swallow
 /// everything); the global keymap is the fallback.
 fn dispatch_key(key: eggplant_core::input::KeyEvent, app: &mut App, compositor: &mut Compositor) {
-    if matches!(compositor.dispatch_key(key, app), KeyResult::Ignored)
+    if matches!(compositor.dispatch_key(key, app), Handled::Ignored)
         && let Some(command) = app.input.registry.lookup_key(&key)
     {
         compositor.execute(command, app);

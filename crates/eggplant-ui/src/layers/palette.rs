@@ -2,7 +2,7 @@
 
 use crate::commands::Command;
 
-use super::picker::{Picker, PickerSource, PickerSpec, Select};
+use super::picker::{Picker, PickerSource, PickerSpec};
 
 pub fn command_palette(commands: Vec<Command>) -> Picker<Command> {
     Picker::new(PickerSpec {
@@ -13,7 +13,7 @@ pub fn command_palette(commands: Vec<Command>) -> Picker<Command> {
             text_of: |command| command.id,
         },
         project: |command| (command.id.to_owned(), command.description.to_owned()),
-        on_select: |command| Select::Execute(*command),
+        on_select: |command| crate::action::AppAction::Run(*command),
         preview_of: None,
     })
 }

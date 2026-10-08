@@ -6,6 +6,7 @@
 //! - `element.rs` — the declarative tree + `paint`, the only `Frame` toucher.
 //! - `compositor.rs` — z-ordered layers, layout, focus, key dispatch.
 
+pub mod action;
 pub mod app;
 pub mod commands;
 pub mod components;

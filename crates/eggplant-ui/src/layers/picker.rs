@@ -12,13 +12,13 @@
 use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
-use crate::commands::{Command, KeyStroke};
+use crate::commands::KeyStroke;
 use crate::components::picker::{self, PickerItem, PickerProps};
 use crate::components::preview::PreviewProps;
-use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::compositor::{Layer, LayerKind};
 use crate::element::Element;
-use crate::layers::notification::Notification;
 use eggplant_core::fuzzy;
 
 /// The picker's closed action set (config: `[keys.picker]`). Typed chars
@@ -84,56 +84,6 @@ pub enum PickerSource<T> {
 /// budget.
 pub type PreviewFn<T> = fn(&T, &App, usize) -> Option<PreviewProps>;
 
-/// What selecting an item means — an intent the picker layer interprets
-/// against `App`. Specs are pure data + pure fns: they never touch `App`
-/// for writes (reads happen at event time via `&App` in sources/previews).
-pub enum Select {
-    /// Just close the picker.
-    Close,
-    /// Open the file (optionally jumping to `(line, col)`), then close
-    /// and focus the editor — the buffer owns the result, so it owns the
-    /// focus. Open failures become error notifications.
-    OpenAt {
-        path: std::path::PathBuf,
-        at: Option<(usize, usize)>,
-    },
-    /// Jump the current buffer to a line, close, focus the editor.
-    JumpToLine(usize),
-    /// Close, then run a registry command (the palette's intent).
-    Execute(Command),
-}
-
-/// The single effect interpreter for picker intents.
-fn interpret(select: Select, app: &mut App) -> KeyResult {
-    match select {
-        Select::Close => KeyResult::Close,
-        Select::OpenAt { path, at } => {
-            match app.editor.open_buffer(&path) {
-                Ok(()) => {
-                    if let Some((line, col)) = at {
-                        app.editor.jump_to(line, col);
-                    }
-                }
-                Err(err) => {
-                    let display = path
-                        .strip_prefix(&app.workspace.root)
-                        .unwrap_or(&path)
-                        .display();
-                    app.notifications
-                        .push(Notification::error(format!("open {display}: {err:#}")));
-                }
-            }
-            // Opening a file moves the cursor: focus follows.
-            KeyResult::CloseUnfocus
-        }
-        Select::JumpToLine(line) => {
-            app.editor.move_to_line(line);
-            KeyResult::CloseUnfocus
-        }
-        Select::Execute(command) => KeyResult::Execute(command),
-    }
-}
-
 /// What makes a picker concrete: its item source plus function pointers —
 /// how to display, what Enter does, optionally how to preview.
 pub struct PickerSpec<T> {
@@ -142,10 +92,10 @@ pub struct PickerSpec<T> {
     pub source: PickerSource<T>,
     /// Display projection: (primary column, free-form text).
     pub project: fn(&T) -> (String, String),
-    /// Enter on an item — returns an INTENT (data), never performs the
-    /// effect. The picker layer interprets it (the Redux pattern: specs
-    /// are pure; effects live in one place).
-    pub on_select: fn(&T) -> Select,
+    /// Enter on an item — returns an ACTION (data), never performs it.
+    /// The compositor's dispatch interprets it (the state-flow contract:
+    /// specs are pure; effects live in one place).
+    pub on_select: fn(&T) -> AppAction,
     /// Materialize the selected item's preview (runs at event time).
     /// The third argument is the row budget — the preview pane's text
     /// capacity from the shared layout formula (preview-as-viewport:
@@ -255,21 +205,27 @@ impl<T> Layer for Picker<T> {
         )
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
         if let Some(action) = eggplant_core::editing::lookup(&app.input.layer_keys.picker, &key) {
             return match action {
+                // Selecting an item performs its action, then the picker
+                // closes and focus follows the outcome to the editor.
                 PickerAction::Confirm => match self.filtered().get(self.selected) {
-                    Some(item) => interpret((self.spec.on_select)(item), app),
-                    None => KeyResult::Close,
+                    Some(item) => Handled::Acted(vec![
+                        (self.spec.on_select)(item),
+                        AppAction::CloseSelf,
+                        AppAction::Unfocus,
+                    ]),
+                    None => Handled::one(AppAction::CloseSelf),
                 },
-                PickerAction::Close => KeyResult::Close,
+                PickerAction::Close => Handled::one(AppAction::CloseSelf),
                 PickerAction::MoveUp => {
                     self.move_selection(-1, app);
-                    KeyResult::Consumed
+                    Handled::quiet()
                 }
                 PickerAction::MoveDown => {
                     self.move_selection(1, app);
-                    KeyResult::Consumed
+                    Handled::quiet()
                 }
             };
         }
@@ -278,16 +234,16 @@ impl<T> Layer for Picker<T> {
             KeyCode::Backspace => {
                 self.input.pop();
                 self.input_changed(app);
-                KeyResult::Consumed
+                Handled::quiet()
             }
             KeyCode::Char(c)
                 if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) =>
             {
                 self.input.push(c);
                 self.input_changed(app);
-                KeyResult::Consumed
+                Handled::quiet()
             }
-            _ => KeyResult::Consumed, // modal-ish
+            _ => Handled::quiet(), // modal-ish
         }
     }
 
@@ -317,7 +273,7 @@ mod tests {
             title: "test",
             source,
             project: |item| (item.0.clone(), String::new()),
-            on_select: |_| Select::Close,
+            on_select: |_| AppAction::CloseSelf,
             preview_of: None,
         }
     }
@@ -336,8 +292,8 @@ mod tests {
             items: vec![Item("alpha".into()), Item("beta".into())],
             text_of: |item| &item.0,
         }));
-        let mut app = app();
-        picker.handle_key(char_key('b'), &mut app);
+        let app = app();
+        picker.handle_key(char_key('b'), &app);
         assert_eq!(picker.filtered().len(), 1);
         assert_eq!(picker.filtered()[0].0, "beta");
     }
@@ -348,16 +304,13 @@ mod tests {
             (0..input.len()).map(|i| Item(format!("hit{i}"))).collect()
         };
         let mut picker = Picker::new(spec(PickerSource::Query { run }));
-        let mut app = app();
+        let app = app();
         assert_eq!(picker.filtered().len(), 0, "queries start empty");
-        picker.handle_key(char_key('a'), &mut app);
+        picker.handle_key(char_key('a'), &app);
         assert_eq!(picker.filtered().len(), 1);
-        picker.handle_key(char_key('b'), &mut app);
+        picker.handle_key(char_key('b'), &app);
         assert_eq!(picker.filtered().len(), 2);
-        picker.handle_key(
-            KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
-            &mut app,
-        );
+        picker.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE), &app);
         assert_eq!(picker.filtered().len(), 1, "backspace re-queries too");
         assert_eq!(picker.selected, 0, "selection resets on input change");
     }
@@ -383,13 +336,13 @@ mod tests {
             preview_of: Some(preview_of),
             ..spec(PickerSource::Query { run })
         });
-        let mut app = app();
+        let app = app();
         assert!(picker.preview.is_none(), "no preview before any item");
-        picker.handle_key(char_key('x'), &mut app);
+        picker.handle_key(char_key('x'), &app);
         assert_eq!(picker.preview.as_ref().unwrap().title, "one");
-        picker.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &mut app);
+        picker.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE), &app);
         assert_eq!(picker.preview.as_ref().unwrap().title, "two");
-        picker.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &mut app);
+        picker.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), &app);
         assert_eq!(picker.preview.as_ref().unwrap().title, "one");
     }
 }

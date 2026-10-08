@@ -3,7 +3,8 @@
 use crate::app::App;
 use eggplant_core::files::FileEntry;
 
-use super::picker::{Picker, PickerSource, PickerSpec, Select};
+use super::picker::{Picker, PickerSource, PickerSpec};
+use crate::action::AppAction;
 
 /// Pathological-tree guard: plenty for real projects, bounded for `/`.
 const FILE_CAP: usize = 20_000;
@@ -24,7 +25,7 @@ pub fn file_picker(app: &App) -> Picker<FileEntry> {
                 .unwrap_or_else(|| file.rel.clone());
             (name, file.rel.clone())
         },
-        on_select: |file| Select::OpenAt {
+        on_select: |file| AppAction::OpenBuffer {
             path: file.abs.clone(),
             at: None,
         },

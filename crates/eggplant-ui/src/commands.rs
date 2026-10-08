@@ -8,28 +8,31 @@ use eggplant_core::input::KeyEvent;
 #[cfg(test)]
 use eggplant_core::input::{KeyCode, KeyModifiers};
 
+use crate::action::AppAction;
 use crate::app::App;
 use crate::app::Leap;
-use crate::compositor::{Compositor, FocusDirection};
+use crate::compositor::FocusDirection;
 use crate::layers::dialog::{ConfirmDialog, Dialog};
 use crate::layers::file_picker;
 use crate::layers::files_panel::{self, FilesPanel};
 use crate::layers::leap::LeapLayer;
-use crate::layers::notification::Notification;
+use crate::layers::notification::Level;
 use crate::layers::search_prompt::SearchPrompt;
 use crate::layers::which_key::WhichKey;
 use crate::layers::{grep, palette};
 use eggplant_core::editing::EditorAction;
 pub use eggplant_core::input::KeyStroke;
 
-/// How a command executes. Both kinds funnel through one dispatch
-/// (`Compositor::execute`): the palette, the which-key tree, global keys,
-/// and modal editing never call implementations directly.
+/// How a command executes. Both kinds are PURE translators to actions —
+/// the single interpreter (`Compositor::dispatch`) performs the effects.
+/// The palette, the which-key tree, global keys, and modal editing never
+/// touch implementations directly.
 #[derive(Clone, Copy)]
 pub enum CommandKind {
-    /// App-level: layers, windows, quit, save, … (runs with the compositor).
-    App(fn(&mut App, &mut Compositor)),
-    /// Modal edit action, interpreted via `editing::interpret` (the same
+    /// App-level: layers, windows, quit, save, … — translates (reading
+    /// `&App` at event time) to the actions that will perform it.
+    App(fn(&App) -> Vec<AppAction>),
+    /// Modal edit action, dispatched via `editing::interpret` (the same
     /// funnel modal keys use).
     Edit(EditorAction),
 }
@@ -50,7 +53,7 @@ impl Command {
     const fn app(
         id: &'static str,
         description: &'static str,
-        f: fn(&mut App, &mut Compositor),
+        f: fn(&App) -> Vec<AppAction>,
     ) -> Self {
         Self {
             id,
@@ -267,105 +270,78 @@ pub fn default_registry() -> Registry {
             "Save the current buffer",
             save_with_notification,
         ),
-        Command::app(
-            "file.open-picker",
-            "Open a file (picker)",
-            |app, compositor| {
-                compositor.push(Box::new(file_picker::file_picker(app)));
-            },
-        ),
+        Command::app("file.open-picker", "Open a file (picker)", |app| {
+            vec![AppAction::PushLayer(Box::new(file_picker::file_picker(
+                app,
+            )))]
+        }),
         Command::app(
             "panel.files.toggle",
             "Toggle file explorer",
             toggle_files_panel,
         ),
         Command::app("window.focus-left", "Focus window to the left", focus_left),
-        Command::app("ui.toggle-wrap", "Toggle soft-wrap", |app, _| {
-            app.wrap = !app.wrap;
-            app.notifications.push(Notification::info(if app.wrap {
-                "wrap on"
-            } else {
-                "wrap off (horizontal scroll)"
-            }));
+        Command::app("ui.toggle-wrap", "Toggle soft-wrap", |_| {
+            vec![AppAction::ToggleWrap]
         }),
         Command::app(
             "window.focus-right",
             "Focus window to the right",
             focus_right,
         ),
-        Command::app("buffer.next", "Switch to next buffer", |app, _| {
-            app.editor.next_buffer()
+        Command::app("buffer.next", "Switch to next buffer", |_| {
+            vec![AppAction::NextBuffer]
         }),
-        Command::app("buffer.prev", "Switch to previous buffer", |app, _| {
-            app.editor.prev_buffer()
+        Command::app("buffer.prev", "Switch to previous buffer", |_| {
+            vec![AppAction::PrevBuffer]
         }),
         Command::app(
             "buffer.close",
             "Close the current buffer (fails on unsaved changes)",
-            |app, _| {
-                if let Err(err) = app.editor.close_current_buffer(false) {
-                    app.notifications
-                        .push(Notification::error(format!("{err:#}")));
-                }
-            },
+            |_| vec![AppAction::CloseCurrentBuffer],
         ),
         Command::app(
             "file.save-quit",
             "Save the current buffer, then quit",
-            |app, compositor| match app.editor.save() {
-                Ok(()) => quit(app, compositor),
-                Err(err) => app
-                    .notifications
-                    .push(Notification::error(format!("save failed: {err:#}"))),
-            },
+            |_| vec![AppAction::SaveQuit],
         ),
-        Command::app(
-            "palette.open",
-            "Open the command palette",
-            |app, compositor| {
-                compositor.push(Box::new(palette::command_palette(
-                    app.input.registry.commands().to_vec(),
-                )));
-            },
-        ),
+        Command::app("palette.open", "Open the command palette", |app| {
+            vec![AppAction::PushLayer(Box::new(palette::command_palette(
+                app.input.registry.commands().to_vec(),
+            )))]
+        }),
         Command::app(
             "search.buffer",
             "Search in buffer (live, n/N cycle)",
-            |_app, compositor| compositor.push(Box::new(SearchPrompt::new())),
+            |_| vec![AppAction::PushLayer(Box::new(SearchPrompt::new()))],
         ),
-        Command::app(
-            "goto.char",
-            "Leap to a 2-char pattern",
-            |app, compositor| {
-                if app.editor.has_buffer() {
-                    app.leap = Some(Leap::default());
-                    compositor.push(Box::new(LeapLayer));
-                }
-            },
-        ),
-        Command::app(
-            "search.lines",
-            "Grep lines in buffer (live)",
-            |app, compositor| {
-                compositor.push(Box::new(grep::buffer_grep(app.editor.buffer_lines())));
-            },
-        ),
-        Command::app(
-            "search.project",
-            "Live grep across the workspace",
-            |app, compositor| {
-                compositor.push(Box::new(crate::layers::project_grep::project_grep(app)));
-            },
-        ),
+        Command::app("goto.char", "Leap to a 2-char pattern", |app| {
+            if app.editor.has_buffer() {
+                vec![
+                    AppAction::SetLeap(Some(Leap::default())),
+                    AppAction::PushLayer(Box::new(LeapLayer)),
+                ]
+            } else {
+                Vec::new()
+            }
+        }),
+        Command::app("search.lines", "Grep lines in buffer (live)", |app| {
+            vec![AppAction::PushLayer(Box::new(grep::buffer_grep(
+                app.editor.buffer_lines(),
+            )))]
+        }),
+        Command::app("search.project", "Live grep across the workspace", |app| {
+            vec![AppAction::PushLayer(Box::new(
+                crate::layers::project_grep::project_grep(app),
+            ))]
+        }),
         Command::app(
             "which-key.open",
             "Open the key-hints menu (Space prefix)",
-            |_, compositor| compositor.push(Box::new(WhichKey::root())),
+            |_| vec![AppAction::PushLayer(Box::new(WhichKey::root()))],
         ),
-        Command::app("theme.cycle", "Cycle to the next color theme", |app, _| {
-            let name = app.theme.cycle();
-            app.notifications
-                .push(Notification::info(format!("theme: {name}")));
+        Command::app("theme.cycle", "Cycle to the next color theme", |_| {
+            vec![AppAction::CycleTheme]
         }),
         Command::app(
             "demo.dialog",
@@ -401,74 +377,67 @@ pub fn default_registry() -> Registry {
     Registry::new(commands, keymap)
 }
 
-// ---- command implementations (shared with the `:` ex commands) ----
+// ---- command translators (pure: `&App` reads → actions as data) ----
+// Shared with the `:` ex commands. None of these mutate anything.
 
-/// Save the current buffer, reporting the outcome as a notification.
-pub(crate) fn save_with_notification(app: &mut App, _: &mut Compositor) {
-    let notification = match app.editor.save() {
-        Ok(()) => Notification::info(format!(
-            "wrote {}",
-            app.editor.display_name().unwrap_or_default()
-        )),
-        Err(err) => Notification::error(format!("save failed: {err:#}")),
-    };
-    app.notifications.push(notification);
+/// Save the current buffer; dispatch reports the outcome.
+pub(crate) fn save_with_notification(_: &App) -> Vec<AppAction> {
+    vec![AppAction::Save]
 }
 
-/// Quit with a confirm dialog when any buffer has unsaved changes.
-pub(crate) fn quit(app: &mut App, compositor: &mut Compositor) {
+/// Quit, confirming first when any buffer has unsaved changes.
+pub(crate) fn quit(app: &App) -> Vec<AppAction> {
     if app.editor.any_modified() {
-        compositor.push(Box::new(ConfirmDialog::new(
+        vec![AppAction::PushLayer(Box::new(ConfirmDialog::new(
             "unsaved changes",
             "Some buffers have unsaved changes. Quit anyway?",
-            |app: &mut App| app.request_quit(),
-        )));
+            vec![AppAction::Quit],
+        )))]
     } else {
-        app.request_quit();
+        vec![AppAction::Quit]
     }
 }
 
-fn force_quit(app: &mut App, _: &mut Compositor) {
-    app.request_quit();
+fn force_quit(_: &App) -> Vec<AppAction> {
+    vec![AppAction::Quit]
 }
 
-fn toggle_files_panel(app: &mut App, compositor: &mut Compositor) {
-    if compositor.has(files_panel::PANEL_ID) {
-        compositor.remove_by_id(files_panel::PANEL_ID);
-        return;
-    }
-    match FilesPanel::new(std::env::current_dir().unwrap_or_default()) {
-        Ok(panel) => compositor.push(Box::new(panel)),
-        Err(err) => app
-            .notifications
-            .push(Notification::error(format!("files panel: {err}"))),
-    }
+fn toggle_files_panel(_: &App) -> Vec<AppAction> {
+    vec![AppAction::ToggleLayer {
+        id: files_panel::PANEL_ID,
+        make: |app| {
+            FilesPanel::new(app.workspace.root.clone())
+                .map(|panel| Box::new(panel) as Box<dyn crate::compositor::Layer>)
+                .map_err(|err| format!("files panel: {err}"))
+        },
+    }]
 }
 
-fn focus_left(_: &mut App, compositor: &mut Compositor) {
-    compositor.focus_direction(FocusDirection::Left);
+fn focus_left(_: &App) -> Vec<AppAction> {
+    vec![AppAction::FocusWindow(FocusDirection::Left)]
 }
 
-fn focus_right(_: &mut App, compositor: &mut Compositor) {
-    compositor.focus_direction(FocusDirection::Right);
+fn focus_right(_: &App) -> Vec<AppAction> {
+    vec![AppAction::FocusWindow(FocusDirection::Right)]
 }
 
-fn toggle_demo_dialog(_: &mut App, compositor: &mut Compositor) {
-    if compositor.has("dialog") {
-        compositor.remove_by_id("dialog");
-    } else {
-        compositor.push(Box::new(Dialog::new(
-            "dialog",
-            "floating layers work.\n\n`F2` or `Esc` closes me.",
-        )));
-    }
+fn toggle_demo_dialog(_: &App) -> Vec<AppAction> {
+    vec![AppAction::ToggleLayer {
+        id: "dialog",
+        make: |_| {
+            Ok(Box::new(Dialog::new(
+                "dialog",
+                "floating layers work.\n\n`F2` or `Esc` closes me.",
+            )) as Box<dyn crate::compositor::Layer>)
+        },
+    }]
 }
 
-fn demo_notification(app: &mut App, _: &mut Compositor) {
-    app.notifications.push(Notification::info(format!(
-        "notification (tick #{})",
-        app.theme.ticks()
-    )));
+fn demo_notification(app: &App) -> Vec<AppAction> {
+    vec![AppAction::Notify {
+        level: Level::Info,
+        message: format!("notification (tick #{})", app.theme.ticks()),
+    }]
 }
 
 #[cfg(test)]

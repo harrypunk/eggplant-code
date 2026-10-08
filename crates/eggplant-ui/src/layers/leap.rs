@@ -8,10 +8,11 @@
 use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
+use crate::action::{AppAction, Handled};
 use crate::app::{App, Leap, LeapLabel};
 use crate::commands::KeyStroke;
 use crate::components::prompt::{self, PromptProps};
-use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::compositor::{Layer, LayerKind};
 use crate::element::Element;
 
 /// Home-row-first label alphabet (type-able without looking).
@@ -122,48 +123,50 @@ impl Layer for LeapLayer {
         )
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    /// Leap state is SHARED (the editor surface dims/labels from it), so
+    /// every change is an action; the layer itself is stateless.
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
         if eggplant_core::editing::lookup(&app.input.layer_keys.leap, &key)
             == Some(LeapAction::Close)
         {
-            app.leap = None;
-            return KeyResult::Close;
+            return Handled::Acted(vec![AppAction::SetLeap(None), AppAction::CloseSelf]);
         }
         let Some(leap) = &app.leap else {
-            return KeyResult::Close; // no leap in progress: nothing to do here
+            return Handled::one(AppAction::CloseSelf); // no leap: nothing to do here
         };
         let Some(input) = resolve_input(leap, &key) else {
-            return KeyResult::Consumed; // modal-ish
+            return Handled::quiet(); // modal-ish
         };
         match input {
             LeapInput::DeleteChar => {
-                if let Some(leap) = &mut app.leap {
-                    leap.pattern.pop();
-                    leap.labels.clear();
-                }
-                KeyResult::Consumed
+                let mut leap = leap.clone();
+                leap.pattern.pop();
+                leap.labels.clear();
+                Handled::one(AppAction::SetLeap(Some(leap)))
             }
             LeapInput::PatternChar(c) => {
-                let leap = app.leap.as_mut().expect("checked above");
+                let mut leap = leap.clone();
                 leap.pattern.push(c);
                 if leap.pattern.chars().count() == PATTERN_LEN {
                     let labels = assign_labels(app.editor.find_matches(&leap.pattern));
                     if labels.is_empty() {
-                        app.leap = None; // no match: done
-                        return KeyResult::Close;
+                        // No match: done.
+                        return Handled::Acted(vec![
+                            AppAction::SetLeap(None),
+                            AppAction::CloseSelf,
+                        ]);
                     }
-                    app.leap.as_mut().expect("checked above").labels = labels;
+                    leap.labels = labels;
                 }
-                KeyResult::Consumed
+                Handled::one(AppAction::SetLeap(Some(leap)))
             }
-            LeapInput::Jump(line, col) => {
-                app.editor.jump_to(line, col);
-                app.leap = None;
-                KeyResult::Close
-            }
+            LeapInput::Jump(line, col) => Handled::Acted(vec![
+                AppAction::JumpTo { line, col },
+                AppAction::SetLeap(None),
+                AppAction::CloseSelf,
+            ]),
             LeapInput::Cancel => {
-                app.leap = None;
-                KeyResult::Close
+                Handled::Acted(vec![AppAction::SetLeap(None), AppAction::CloseSelf])
             }
         }
     }

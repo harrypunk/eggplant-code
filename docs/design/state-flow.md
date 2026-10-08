@@ -166,13 +166,15 @@ one roof.
 
 ## Migration path (each step independently mergeable)
 
-1. **`AppAction` + `dispatch`** — introduce the enum and interpreter;
-   migrate `notifications.push` sites (the biggest violator) to
-   `AppAction::Notify`. Layers gain a way to return actions
-   (`KeyResult::Act(Vec<AppAction>)` or merge the enums outright).
-2. **Absorb `Select` and `KeyResult`'s structural arms** into `AppAction`;
-   `commands::apply` becomes `Command → Vec<AppAction>` + dispatch.
-3. **Stylesheet extraction** — mechanical, one component at a time:
+1. ✅ **`AppAction` + `dispatch`** — landed: `action.rs` holds the enum;
+   `Compositor::dispatch` is the single interpreter; `Layer::handle_key`
+   is read-only on shared state (`&App`) and returns `Handled`. `KeyResult`
+   and `Select` are gone — merged outright. Commands are pure translators
+   `fn(&App) -> Vec<AppAction>`; `ConfirmDialog` holds actions, not
+   callbacks; `editing::resolve` is pure (pending travels as data).
+2. ✅ **Absorbed** in step 1 (one atomic migration beats two interim
+   shapes).
+3. **Stylesheet extraction** (next branch) — mechanical, one component at a time:
    replace `Style::default().fg(theme.x)` with `StyleClass::X` spans;
    components stop importing `Theme`. Land `stylesheet.rs` first with the
    full current mapping so behavior doesn't change mid-flight.

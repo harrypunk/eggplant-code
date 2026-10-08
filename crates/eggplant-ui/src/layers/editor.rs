@@ -9,10 +9,11 @@
 use eggplant_core::input::KeyEvent;
 use ratatui::layout::Rect;
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::components::editor::{self, EditorLine, EditorProps};
 use crate::components::welcome::{self, WelcomeProps};
-use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::compositor::{Layer, LayerKind};
 use crate::element::Element;
 use eggplant_core::editing::{self, Resolved, ViewAction};
 use eggplant_core::viewport::Viewport;
@@ -67,23 +68,24 @@ impl EditorSurface {
             .saturating_sub(editor::gutter_width(app.editor.display_line_count()))
     }
 
-    /// Viewport intents: scroll policy is the viewport's; cursor movement
-    /// goes through the facade (buffer state).
-    fn apply_view(&mut self, view: ViewAction, app: &mut App) {
+    /// Viewport intents: scroll policy is the viewport's (local state);
+    /// cursor movement is buffer state — returned as actions.
+    fn apply_view(&mut self, view: ViewAction, app: &App) -> Vec<AppAction> {
         let (cursor_line, _) = app.editor.cursor();
         let Some(viewport) = self.viewport(app) else {
-            return;
+            return Vec::new();
         };
         match view {
-            ViewAction::CenterCursor => viewport.center_on(cursor_line),
+            ViewAction::CenterCursor => {
+                viewport.center_on(cursor_line);
+                Vec::new()
+            }
             ViewAction::PageDown => {
                 let last = app.editor.display_line_count().saturating_sub(1);
-                let target = viewport.page_down(cursor_line, last);
-                app.editor.move_to_line(target); // facade clamps
+                vec![AppAction::MoveToLine(viewport.page_down(cursor_line, last))]
             }
             ViewAction::PageUp => {
-                let target = viewport.page_up(cursor_line);
-                app.editor.move_to_line(target);
+                vec![AppAction::MoveToLine(viewport.page_up(cursor_line))]
             }
         }
     }
@@ -142,27 +144,27 @@ impl Layer for EditorSurface {
         self.sync_viewport(app);
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
-        let result = match editing::resolve(
-            &mut app.input.pending,
+    /// Pure resolution + intents: the editor surface never mutates shared
+    /// state. `Modal` carries the pending writeback + resolution to the
+    /// interpreter; `View` intents are local (scroll) plus cursor actions;
+    /// the next frame's `resize` re-syncs the viewport.
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
+        let (pending, resolved) = editing::resolve(
+            &app.input.pending,
             app.editor.mode(),
             key,
             &app.input.keymaps,
-        ) {
-            Resolved::Swallowed => KeyResult::Consumed,
-            Resolved::Ignored => KeyResult::Ignored,
-            // Viewport intents belong to this layer (the scroll owner).
+        );
+        match resolved {
+            Resolved::Swallowed => Handled::one(AppAction::SetPending(pending)),
+            Resolved::Ignored => Handled::Ignored,
             Resolved::View(view) => {
-                self.apply_view(view, app);
-                KeyResult::Consumed
+                let mut actions = self.apply_view(view, app);
+                actions.push(AppAction::SetPending(pending));
+                Handled::Acted(actions)
             }
-            resolved => {
-                editing::interpret_resolved(resolved, app);
-                KeyResult::Consumed
-            }
-        };
-        self.sync_viewport(app);
-        result
+            resolved => Handled::one(AppAction::Modal { pending, resolved }),
+        }
     }
 
     fn kind(&self) -> LayerKind {

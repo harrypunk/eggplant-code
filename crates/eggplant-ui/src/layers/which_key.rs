@@ -5,10 +5,11 @@
 use eggplant_core::input::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::commands::{KeyNode, WHICH_KEY_ROOT};
 use crate::components::which_key::{self, KeyHint, WhichKeyProps};
-use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::compositor::{Layer, LayerKind};
 use crate::element::Element;
 
 pub struct WhichKey {
@@ -44,26 +45,29 @@ impl Layer for WhichKey {
         which_key::view(&WhichKeyProps { path, hints }, area, &app.theme.current)
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
         let KeyCode::Char(c) = key.code else {
             // Modal-ish: Esc closes, everything else is swallowed.
             return if key.code == KeyCode::Esc {
-                KeyResult::Close
+                Handled::one(AppAction::CloseSelf)
             } else {
-                KeyResult::Consumed
+                Handled::quiet()
             };
         };
         match self.node.iter().find(|node| node.key() == c) {
+            // Run translates + dispatches the command; then this menu closes.
             Some(KeyNode::Leaf { command, .. }) => match app.input.registry.by_id(command) {
-                Some(command) => KeyResult::Execute(command),
-                None => KeyResult::Close,
+                Some(command) => {
+                    Handled::Acted(vec![AppAction::Run(command), AppAction::CloseSelf])
+                }
+                None => Handled::one(AppAction::CloseSelf),
             },
             Some(KeyNode::Group { children, .. }) => {
                 self.path.push(c);
                 self.node = children;
-                KeyResult::Consumed
+                Handled::quiet()
             }
-            None => KeyResult::Close, // unknown key: dismiss quietly
+            None => Handled::one(AppAction::CloseSelf), // unknown key: dismiss quietly
         }
     }
 

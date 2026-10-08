@@ -17,12 +17,13 @@ use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders};
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::components::files_panel::{self, FilesPanelProps, RowKind, RowProps};
-use crate::compositor::{KeyResult, Layer, LayerKind, Side};
+use crate::compositor::{Layer, LayerKind, Side};
 use crate::element::Element;
-use crate::layers::notification::Notification;
+use crate::layers::notification::Level;
 use eggplant_core::filetree::{FileTree, TreeRow, fs_lister};
 
 pub const PANEL_ID: &str = "files";
@@ -197,31 +198,28 @@ impl FilesPanel {
         }
     }
 
-    fn open_selected(&mut self, app: &mut App) -> KeyResult {
+    fn open_selected(&mut self, app: &App) -> Handled {
         let Some(row) = self.selected_row(app) else {
-            return KeyResult::Consumed;
+            return Handled::quiet();
         };
         if row.is_dir {
-            if let Err(err) = self.tree.toggle(&row.path) {
-                app.notifications
-                    .push(Notification::error(format!("cannot read directory: {err}")));
-            }
-            return KeyResult::Consumed;
+            // Tree expansion is local state; only the failure crosses slices.
+            return match self.tree.toggle(&row.path) {
+                Ok(()) => Handled::quiet(),
+                Err(err) => Handled::one(AppAction::Notify {
+                    level: Level::Error,
+                    message: format!("cannot read directory: {err}"),
+                }),
+            };
         }
-        match app.editor.open_buffer(&row.path) {
-            Ok(()) => {
-                app.notifications.push(Notification::info(format!(
-                    "opened {}",
-                    app.editor.display_name().unwrap_or_default()
-                )));
-                KeyResult::Unfocus
-            }
-            Err(err) => {
-                app.notifications
-                    .push(Notification::error(format!("open failed: {err:#}")));
-                KeyResult::Consumed
-            }
-        }
+        Handled::Acted(vec![
+            AppAction::OpenBuffer {
+                path: row.path.clone(),
+                at: None,
+            },
+            // Opening a file moves the cursor: focus follows.
+            AppAction::Unfocus,
+        ])
     }
 }
 
@@ -254,45 +252,47 @@ impl Layer for FilesPanel {
         )
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
         // Keys are data: exact-modifier lookup means Ctrl/Alt keys (C-l,
         // C-h…) never match plain-letter bindings and fall through to the
         // global keymap on their own.
         let Some(action) = eggplant_core::editing::lookup(&app.input.layer_keys.explorer, &key)
         else {
-            return KeyResult::Ignored;
+            return Handled::Ignored;
         };
         match action {
             ExplorerAction::MoveDown => {
                 self.move_selection(1, app);
-                KeyResult::Consumed
+                Handled::quiet()
             }
             ExplorerAction::MoveUp => {
                 self.move_selection(-1, app);
-                KeyResult::Consumed
+                Handled::quiet()
             }
-            ExplorerAction::ExpandOrDescend => {
-                if let Err(err) = self.expand_or_descend(app) {
-                    app.notifications
-                        .push(Notification::error(format!("cannot read directory: {err}")));
-                }
-                KeyResult::Consumed
-            }
+            ExplorerAction::ExpandOrDescend => match self.expand_or_descend(app) {
+                Ok(()) => Handled::quiet(),
+                Err(err) => Handled::one(AppAction::Notify {
+                    level: Level::Error,
+                    message: format!("cannot read directory: {err}"),
+                }),
+            },
             ExplorerAction::CollapseOrParent => {
                 self.collapse_or_parent(app);
-                KeyResult::Consumed
+                Handled::quiet()
             }
             ExplorerAction::ToggleAll => {
                 let show_all = self.toggle_show_all(app);
-                app.notifications.push(Notification::info(if show_all {
-                    "explorer: showing all files"
-                } else {
-                    "explorer: filtered"
-                }));
-                KeyResult::Consumed
+                Handled::one(AppAction::Notify {
+                    level: Level::Info,
+                    message: if show_all {
+                        "explorer: showing all files".to_owned()
+                    } else {
+                        "explorer: filtered".to_owned()
+                    },
+                })
             }
             ExplorerAction::Open => self.open_selected(app),
-            ExplorerAction::Unfocus => KeyResult::Unfocus,
+            ExplorerAction::Unfocus => Handled::one(AppAction::Unfocus),
         }
     }
 
@@ -378,19 +378,13 @@ mod tests {
         // C-l is Char('l') + CONTROL: without the guard the panel eats it
         // as "expand" and window focus can never move right out of the
         // explorer.
-        let (root, mut app, mut panel) = test_tree();
+        let (root, app, mut panel) = test_tree();
 
         let ctrl_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::CONTROL);
-        assert!(matches!(
-            panel.handle_key(ctrl_l, &mut app),
-            KeyResult::Ignored
-        ));
+        assert!(matches!(panel.handle_key(ctrl_l, &app), Handled::Ignored));
 
         let plain_l = KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE);
-        assert!(matches!(
-            panel.handle_key(plain_l, &mut app),
-            KeyResult::Consumed
-        ));
+        assert!(matches!(panel.handle_key(plain_l, &app), Handled::Acted(_)));
         assert!(panel.rows(&app)[0].expanded);
         fs::remove_dir_all(root).unwrap();
     }

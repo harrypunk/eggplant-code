@@ -39,7 +39,7 @@ pub struct LeapLabel {
 
 /// Leap-jump state (`Space g c`): the 2-char pattern typed so far, then the
 /// labeled matches. `Some` = a leap is in progress (editor renders dimmed).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Leap {
     pub pattern: String,
     pub labels: Vec<LeapLabel>,
@@ -111,7 +111,7 @@ pub struct InputState {
     /// Layer-local keymaps (explorer, picker, prompt, dialog, leap).
     pub layer_keys: crate::keymaps::LayerKeymaps,
     /// Pending modal input — the statusline's showcmd-style hint reads
-    /// it; `editing::resolve` mutates it.
+    /// it; written by dispatch from `editing::resolve`'s pure output.
     pub pending: PendingState,
 }
 

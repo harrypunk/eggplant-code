@@ -3,10 +3,11 @@
 use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::components::dialog;
-use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::compositor::{Layer, LayerKind};
 use crate::element::Element;
 
 /// Simple modal message dialog (demo of the float layer kind).
@@ -29,12 +30,12 @@ impl Layer for Dialog {
         dialog::dialog_view(&self.title, &self.body, area, &app.theme.current)
     }
 
-    fn handle_key(&mut self, key: KeyEvent, _app: &mut App) -> KeyResult {
+    fn handle_key(&mut self, key: KeyEvent, _app: &App) -> Handled {
         match key.code {
             // Modal: Esc or the toggle key closes it, everything else is
             // swallowed so it can't leak to layers below.
-            KeyCode::Esc | KeyCode::F(2) => KeyResult::Close,
-            _ => KeyResult::Consumed,
+            KeyCode::Esc | KeyCode::F(2) => Handled::one(AppAction::CloseSelf),
+            _ => Handled::quiet(),
         }
     }
 
@@ -46,9 +47,6 @@ impl Layer for Dialog {
         "dialog"
     }
 }
-
-/// Callback run when a `ConfirmDialog` is accepted.
-type ConfirmAction = Box<dyn FnOnce(&mut App)>;
 
 /// Modal yes/no confirmation; runs `on_confirm` when accepted.
 /// The confirm dialog's closed action set (config: `[keys.dialog]`).
@@ -85,19 +83,21 @@ pub const DEFAULT_KEYS: &[(KeyStroke, DialogAction)] = &[
 pub struct ConfirmDialog {
     title: String,
     message: String,
-    on_confirm: Option<ConfirmAction>,
+    /// Actions to dispatch when accepted — plain data (no closures
+    /// reaching into `App`).
+    on_confirm: Vec<AppAction>,
 }
 
 impl ConfirmDialog {
     pub fn new(
         title: impl Into<String>,
         message: impl Into<String>,
-        on_confirm: impl FnOnce(&mut App) + 'static,
+        on_confirm: Vec<AppAction>,
     ) -> Self {
         Self {
             title: title.into(),
             message: message.into(),
-            on_confirm: Some(Box::new(on_confirm)),
+            on_confirm,
         }
     }
 }
@@ -107,16 +107,15 @@ impl Layer for ConfirmDialog {
         dialog::confirm_view(&self.title, &self.message, area, &app.theme.current)
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
         match eggplant_core::editing::lookup(&app.input.layer_keys.dialog, &key) {
             Some(DialogAction::Confirm) => {
-                if let Some(on_confirm) = self.on_confirm.take() {
-                    on_confirm(app);
-                }
-                KeyResult::Close
+                let mut actions = std::mem::take(&mut self.on_confirm);
+                actions.push(AppAction::CloseSelf);
+                Handled::Acted(actions)
             }
-            Some(DialogAction::Cancel) => KeyResult::Close,
-            None => KeyResult::Consumed, // modal
+            Some(DialogAction::Cancel) => Handled::one(AppAction::CloseSelf),
+            None => Handled::quiet(), // modal
         }
     }
 

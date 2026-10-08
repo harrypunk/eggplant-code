@@ -1,6 +1,7 @@
 //! Buffer grep (`Space s c`): a picker over the current buffer's lines.
 
-use super::picker::{Picker, PickerSource, PickerSpec, Select};
+use super::picker::{Picker, PickerSource, PickerSpec};
+use crate::action::AppAction;
 
 /// One buffer line, as a picker item.
 pub struct BufferLine {
@@ -24,7 +25,7 @@ pub fn buffer_grep(lines: Vec<String>) -> Picker<BufferLine> {
             text_of: |item| &item.text,
         },
         project: |item| (format!(":{}", item.line + 1), item.text.clone()),
-        on_select: |item| Select::JumpToLine(item.line),
+        on_select: |item| AppAction::MoveToLine(item.line),
         preview_of: None,
     })
 }

@@ -252,7 +252,7 @@ mod tests {
             eggplant_core::input::KeyModifiers::NONE,
         );
         assert_eq!(
-            eggplant_core::editing::resolve(&mut Default::default(), Mode::Normal, key, &keymaps),
+            eggplant_core::editing::resolve(&Default::default(), Mode::Normal, key, &keymaps).1,
             eggplant_core::editing::Resolved::Act(EditorAction::EnterInsert, 1)
         );
     }

@@ -5,10 +5,11 @@
 use eggplant_core::input::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
 
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::commands::KeyStroke;
 use crate::components::prompt::{self, PromptProps};
-use crate::compositor::{KeyResult, Layer, LayerKind};
+use crate::compositor::{Layer, LayerKind};
 use crate::element::Element;
 
 /// The search prompt's closed action set (config: `[keys.prompt]`).
@@ -66,31 +67,28 @@ impl Layer for SearchPrompt {
         )
     }
 
-    fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> KeyResult {
+    fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
         if let Some(action) = eggplant_core::editing::lookup(&app.input.layer_keys.prompt, &key) {
             return match action {
                 // Close clears the highlight; Confirm keeps it for n/N.
                 PromptAction::Close => {
-                    app.editor.clear_search();
-                    KeyResult::Close
+                    Handled::Acted(vec![AppAction::ClearSearch, AppAction::CloseSelf])
                 }
-                PromptAction::Confirm => KeyResult::Close,
+                PromptAction::Confirm => Handled::one(AppAction::CloseSelf),
             };
         }
         match key.code {
             KeyCode::Backspace => {
                 self.input.pop();
-                app.editor.search(&self.input);
-                KeyResult::Consumed
+                Handled::one(AppAction::Search(self.input.clone()))
             }
             KeyCode::Char(c)
                 if matches!(key.modifiers, KeyModifiers::NONE | KeyModifiers::SHIFT) =>
             {
                 self.input.push(c);
-                app.editor.search(&self.input);
-                KeyResult::Consumed
+                Handled::one(AppAction::Search(self.input.clone()))
             }
-            _ => KeyResult::Consumed, // modal-ish
+            _ => Handled::quiet(), // modal-ish
         }
     }
 
