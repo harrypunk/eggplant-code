@@ -299,6 +299,27 @@ mod tests {
     }
 
     #[test]
+    fn confirm_emits_actions_as_data_without_performing_them() {
+        // The state-flow seam: a layer's effect is its returned actions —
+        // assert them directly, no App mutation involved.
+        let mut picker = Picker::new(spec(PickerSource::List {
+            items: vec![Item("a".into())],
+            text_of: |item| &item.0,
+        }));
+        let app = app();
+        let handled = picker.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &app);
+        let Handled::Acted(actions) = handled else {
+            panic!("confirm must act");
+        };
+        assert_eq!(actions.len(), 3, "select + close + focus-follows");
+        assert!(matches!(actions[0], AppAction::CloseSelf)); // spec's on_select
+        assert!(matches!(actions[1], AppAction::CloseSelf));
+        assert!(matches!(actions[2], AppAction::Unfocus));
+        // …and nothing happened to shared state in the meantime.
+        assert_eq!(app.input.pending, Default::default());
+    }
+
+    #[test]
     fn query_source_re_runs_on_input_change() {
         let run = |input: &str, _: &App| -> Vec<Item> {
             (0..input.len()).map(|i| Item(format!("hit{i}"))).collect()
