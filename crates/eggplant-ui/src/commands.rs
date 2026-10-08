@@ -129,18 +129,38 @@ pub enum KeyNode {
         description: &'static str,
         children: &'static [KeyNode],
     },
+    /// Any digit 0-9 resolves to a parameterized action (buffer
+    /// quick-choose) — one entry in the data instead of ten enumerated
+    /// commands (registry commands are nullary; digits are parsed).
+    DigitLeaves {
+        description: &'static str,
+        act: fn(usize) -> AppAction,
+    },
 }
 
 impl KeyNode {
-    pub fn key(&self) -> char {
+    /// The fixed key this node binds; digit leaves bind a RANGE (0-9),
+    /// not one key — `None`.
+    pub fn key(&self) -> Option<char> {
         match self {
-            KeyNode::Leaf { key, .. } | KeyNode::Group { key, .. } => *key,
+            KeyNode::Leaf { key, .. } | KeyNode::Group { key, .. } => Some(*key),
+            KeyNode::DigitLeaves { .. } => None,
         }
     }
 
     pub fn description(&self) -> &'static str {
         match self {
-            KeyNode::Leaf { description, .. } | KeyNode::Group { description, .. } => description,
+            KeyNode::Leaf { description, .. }
+            | KeyNode::Group { description, .. }
+            | KeyNode::DigitLeaves { description, .. } => description,
+        }
+    }
+
+    /// The digit-leaf action, when this node is one.
+    pub fn digit_action(&self) -> Option<fn(usize) -> AppAction> {
+        match self {
+            KeyNode::DigitLeaves { act, .. } => Some(*act),
+            _ => None,
         }
     }
 }
@@ -197,6 +217,11 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
                 key: 'd',
                 description: "close",
                 command: "buffer.close",
+            },
+            // Quick-choose by index; out-of-range is ignored.
+            KeyNode::DigitLeaves {
+                description: "buffer n",
+                act: |n| AppAction::SwitchBuffer(n),
             },
         ],
     },
@@ -492,6 +517,8 @@ mod tests {
                         "which-key leaf '{command}' has no command"
                     ),
                     KeyNode::Group { children, .. } => walk(children, registry),
+                    // Digit leaves carry their action inline — no command id.
+                    KeyNode::DigitLeaves { .. } => {}
                 }
             }
         }

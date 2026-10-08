@@ -11,9 +11,10 @@ use ratatui::text::{Line, Span};
 use crate::element::Element;
 use crate::stylesheet::{StyleClass, Stylesheet};
 
-/// One available key: the char to press + what it does.
+/// One available key: its label + what it does. The label is a string
+/// because digit ranges display as "0-9", not one char.
 pub struct KeyHint {
-    pub key: char,
+    pub key: String,
     pub description: &'static str,
 }
 
@@ -44,7 +45,7 @@ pub fn view(props: &WhichKeyProps, area: Rect, sheet: &Stylesheet) -> Element {
     let content_width = props
         .hints
         .iter()
-        .map(|hint| 4 + hint.description.len())
+        .map(|hint| hint.key.len() + 4 + hint.description.len())
         .max()
         .unwrap_or(0) as u16;
     let width = (content_width + 2).min(area.width.saturating_sub(MARGIN * 2));
@@ -105,15 +106,15 @@ mod tests {
             path: "SPC".to_owned(),
             hints: vec![
                 KeyHint {
-                    key: 'f',
+                    key: "f".into(),
                     description: "+file",
                 },
                 KeyHint {
-                    key: 'b',
+                    key: "b".into(),
                     description: "+buffer",
                 },
                 KeyHint {
-                    key: 'q',
+                    key: "q".into(),
                     description: "quit",
                 },
             ],
@@ -162,7 +163,7 @@ mod tests {
         let mut props = props();
         props.hints = (b'a'..=b'z')
             .map(|c| KeyHint {
-                key: c as char,
+                key: (c as char).to_string(),
                 description: "entry",
             })
             .collect();

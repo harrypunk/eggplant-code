@@ -23,6 +23,11 @@ pub enum PendingKey {
     Goto,
     /// `z` prefix: view commands (`zz` center…). Not an operator.
     View,
+    /// `[` / `]` prefixes: the next/prev family (vim-unimpaired style —
+    /// `[b`/`]b` buffers; `]d` diagnostics, `]c` changes slot in later).
+    /// Not operators.
+    BracketLeft,
+    BracketRight,
 }
 
 impl PendingKey {
@@ -33,6 +38,8 @@ impl PendingKey {
             Self::Yank => 'y',
             Self::Goto => 'g',
             Self::View => 'z',
+            Self::BracketLeft => '[',
+            Self::BracketRight => ']',
         }
     }
 }
@@ -80,6 +87,15 @@ pub enum EditorAction {
     GotoBottom,
     /// `gg`: first line, or line `count` with a count.
     MoveFirstLine,
+    /// Next/previous buffer (`]b`/`[b`).
+    NextBuffer,
+    PrevBuffer,
+    /// LSP gotos (`gd`/`gi`/`gr`) — placeholders: interpret notifies;
+    /// when LSP lands, the editor layer intercepts these and routes to
+    /// app-level effects (async request, picker).
+    GotoDefinition,
+    GotoImplementation,
+    GotoReferences,
     DeleteChar,
     DeleteLine,
     YankLine,
@@ -121,6 +137,11 @@ impl EditorAction {
         EditorAction::LineEnd,
         EditorAction::GotoBottom,
         EditorAction::MoveFirstLine,
+        EditorAction::NextBuffer,
+        EditorAction::PrevBuffer,
+        EditorAction::GotoDefinition,
+        EditorAction::GotoImplementation,
+        EditorAction::GotoReferences,
         EditorAction::DeleteChar,
         EditorAction::DeleteLine,
         EditorAction::YankLine,
@@ -160,6 +181,11 @@ impl EditorAction {
             EditorAction::LineEnd => "edit.line-end",
             EditorAction::GotoBottom => "edit.goto-bottom",
             EditorAction::MoveFirstLine => "edit.goto-first-line",
+            EditorAction::NextBuffer => "edit.next-buffer",
+            EditorAction::PrevBuffer => "edit.prev-buffer",
+            EditorAction::GotoDefinition => "edit.goto-definition",
+            EditorAction::GotoImplementation => "edit.goto-implementation",
+            EditorAction::GotoReferences => "edit.goto-references",
             EditorAction::DeleteChar => "edit.delete-char",
             EditorAction::DeleteLine => "edit.delete-line",
             EditorAction::YankLine => "edit.yank-line",
@@ -200,6 +226,11 @@ impl EditorAction {
             EditorAction::LineEnd => "Line end",
             EditorAction::GotoBottom => "Goto bottom",
             EditorAction::MoveFirstLine => "Goto first line",
+            EditorAction::NextBuffer => "Next buffer",
+            EditorAction::PrevBuffer => "Previous buffer",
+            EditorAction::GotoDefinition => "Goto definition (LSP)",
+            EditorAction::GotoImplementation => "Goto implementation (LSP)",
+            EditorAction::GotoReferences => "Goto references (LSP)",
             EditorAction::DeleteChar => "Delete char",
             EditorAction::DeleteLine => "Delete line",
             EditorAction::YankLine => "Yank line",
@@ -290,6 +321,11 @@ pub fn interpret(action: EditorAction, count: usize, ctx: &mut impl EditorCtx) {
         EditorAction::LineEnd => ctx.editor().move_line_end(),
         EditorAction::GotoBottom => ctx.editor().move_last_line(),
         EditorAction::MoveFirstLine => ctx.editor().move_first_line(count),
+        EditorAction::NextBuffer => ctx.editor().next_buffer(),
+        EditorAction::PrevBuffer => ctx.editor().prev_buffer(),
+        EditorAction::GotoDefinition => ctx.notify("goto definition: LSP not wired yet"),
+        EditorAction::GotoImplementation => ctx.notify("goto implementation: LSP not wired yet"),
+        EditorAction::GotoReferences => ctx.notify("goto references: LSP not wired yet"),
         EditorAction::DeleteChar | EditorAction::DeleteForward => {
             ctx.editor().delete_char_at_cursor()
         }
@@ -595,16 +631,33 @@ fn resolve_modal_inner(
             (PendingKey::Yank, Some('y')) => Resolved::Act(EditorAction::YankLine, total),
             (PendingKey::Goto, Some('g')) => Resolved::Act(EditorAction::MoveFirstLine, total),
             (PendingKey::View, Some('z')) => Resolved::View(ViewAction::CenterCursor),
+            // Brackets are quick nav, deliberately count-free (`3]b` ≡ `]b`).
+            (PendingKey::BracketRight, Some('b')) => Resolved::Act(EditorAction::NextBuffer, 1),
+            (PendingKey::BracketLeft, Some('b')) => Resolved::Act(EditorAction::PrevBuffer, 1),
+            // The goto family's LSP members: reserved now, wired later.
+            (PendingKey::Goto, Some('d')) => Resolved::Act(EditorAction::GotoDefinition, 1),
+            (PendingKey::Goto, Some('i')) => Resolved::Act(EditorAction::GotoImplementation, 1),
+            (PendingKey::Goto, Some('r')) => Resolved::Act(EditorAction::GotoReferences, 1),
             _ => {
-                // A motion resolves an operator; prefixes cancel otherwise.
-                if matches!(pending_key, PendingKey::Goto | PendingKey::View) {
+                // A motion resolves an operator; non-operator prefixes
+                // (`g`/`z`/`[`/`]`) cancel on anything else.
+                if matches!(
+                    pending_key,
+                    PendingKey::Goto
+                        | PendingKey::View
+                        | PendingKey::BracketLeft
+                        | PendingKey::BracketRight
+                ) {
                     return Resolved::Swallowed;
                 }
                 match lookup(&keymaps.operator_motions, &key) {
                     Some(motion) => match pending_key {
                         PendingKey::Delete => Resolved::DeleteMotion(motion, total),
                         PendingKey::Yank => Resolved::YankMotion(motion, total),
-                        PendingKey::Goto | PendingKey::View => unreachable!(),
+                        PendingKey::Goto
+                        | PendingKey::View
+                        | PendingKey::BracketLeft
+                        | PendingKey::BracketRight => unreachable!(),
                     },
                     None => Resolved::Swallowed, // cancelled
                 }
@@ -643,6 +696,8 @@ fn arm_key(c: char) -> Option<PendingKey> {
         'y' => Some(PendingKey::Yank),
         'g' => Some(PendingKey::Goto),
         'z' => Some(PendingKey::View),
+        '[' => Some(PendingKey::BracketLeft),
+        ']' => Some(PendingKey::BracketRight),
         _ => None,
     }
 }
@@ -748,6 +803,37 @@ mod tests {
         // Visual too, and no count semantics (a pending count is dropped).
         let (_, r) = resolve(&pending, Mode::Visual, ctrl('f'), &keymaps);
         assert_eq!(r, Resolved::View(ViewAction::PageDown));
+    }
+
+    #[test]
+    fn bracket_b_switches_buffers() {
+        let (resolved, _) = resolve_normal("]b");
+        assert_eq!(resolved, Resolved::Act(EditorAction::NextBuffer, 1));
+        let (resolved, _) = resolve_normal("[b");
+        assert_eq!(resolved, Resolved::Act(EditorAction::PrevBuffer, 1));
+        // Deliberately count-free: `3]b` ≡ `]b`.
+        let (resolved, _) = resolve_normal("3]b");
+        assert_eq!(resolved, Resolved::Act(EditorAction::NextBuffer, 1));
+    }
+
+    #[test]
+    fn lsp_gotos_resolve_to_placeholder_actions() {
+        let (resolved, _) = resolve_normal("gd");
+        assert_eq!(resolved, Resolved::Act(EditorAction::GotoDefinition, 1));
+        let (resolved, _) = resolve_normal("gi");
+        assert_eq!(resolved, Resolved::Act(EditorAction::GotoImplementation, 1));
+        let (resolved, _) = resolve_normal("gr");
+        assert_eq!(resolved, Resolved::Act(EditorAction::GotoReferences, 1));
+        // gg is untouched.
+        let (resolved, _) = resolve_normal("gg");
+        assert_eq!(resolved, Resolved::Act(EditorAction::MoveFirstLine, 1));
+    }
+
+    #[test]
+    fn bracket_prefix_cancels_on_other_keys() {
+        let (resolved, pending) = resolve_normal("]x");
+        assert_eq!(resolved, Resolved::Swallowed);
+        assert_eq!(pending.key, None, "cancelled prefix is forgotten");
     }
 
     #[test]

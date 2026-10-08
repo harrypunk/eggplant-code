@@ -50,6 +50,9 @@ pub enum AppAction {
     },
     NextBuffer,
     PrevBuffer,
+    /// Jump straight to buffer `index` (`Space b 0-9`); out-of-range
+    /// indices are ignored (quiet no-op).
+    SwitchBuffer(usize),
     /// Close the current buffer; unsaved-changes errors notify.
     CloseCurrentBuffer,
     /// Move the cursor to a line (buffer grep, page scrolls).
@@ -114,6 +117,7 @@ impl ActionEvent {
             AppAction::OpenBuffer { .. }
             | AppAction::NextBuffer
             | AppAction::PrevBuffer
+            | AppAction::SwitchBuffer(_)
             | AppAction::CloseCurrentBuffer => Self::BufferChanged,
             _ => Self::Other,
         }
@@ -193,6 +197,10 @@ impl Compositor {
             },
             AppAction::NextBuffer => app.editor.next_buffer(),
             AppAction::PrevBuffer => app.editor.prev_buffer(),
+            AppAction::SwitchBuffer(index) => {
+                // Quick-choose: out-of-range is a quiet no-op, not an error.
+                let _ = app.editor.switch_buffer(index);
+            }
             AppAction::CloseCurrentBuffer => {
                 if let Err(err) = app.editor.close_current_buffer(false) {
                     app.notifications
@@ -280,4 +288,39 @@ fn save_and_notify(app: &mut App) {
         }
     };
     app.notifications.push(notification);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn two_buffer_app() -> App {
+        let dir = std::env::temp_dir().join(format!("eggplant-sw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), "a").unwrap();
+        std::fs::write(dir.join("b.txt"), "b").unwrap();
+        let mut app = App::new(eggplant_core::Editor::open(dir.join("a.txt")).unwrap());
+        app.editor.open_buffer(dir.join("b.txt")).unwrap();
+        app.editor.switch_buffer(0).unwrap();
+        app
+    }
+
+    #[test]
+    fn switch_buffer_jumps_in_range_and_ignores_out_of_range() {
+        let mut app = two_buffer_app();
+        let mut compositor = Compositor::default();
+
+        compositor.dispatch(AppAction::SwitchBuffer(1), None, &mut app);
+        assert_eq!(app.editor.current_buffer(), Some(1));
+
+        compositor.dispatch(AppAction::SwitchBuffer(9), None, &mut app);
+        assert_eq!(
+            app.editor.current_buffer(),
+            Some(1),
+            "out-of-range index is a quiet no-op"
+        );
+
+        compositor.dispatch(AppAction::SwitchBuffer(0), None, &mut app);
+        assert_eq!(app.editor.current_buffer(), Some(0));
+    }
 }
