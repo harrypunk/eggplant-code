@@ -1292,6 +1292,31 @@ impl Editor {
         self.register.as_ref()
     }
 
+    // ---- agent host surface ----
+
+    /// The current buffer's full text (the agent's read of an open buffer).
+    pub fn text(&self) -> String {
+        self.current
+            .and_then(|i| self.buffers.get(i))
+            .map(|b| b.doc.text().to_string())
+            .unwrap_or_default()
+    }
+
+    /// Replace the current buffer's ENTIRE text as one undoable
+    /// transaction — the agent edit path: `apply_edits` runs pure on the
+    /// string (eggplant-agent), then the new content lands as a single
+    /// change, so one `u` reverts the agent's whole turn on this file.
+    pub fn replace_text(&mut self, text: String) -> Result<()> {
+        if self.current.is_none() {
+            bail!("no buffer to replace");
+        }
+        let len = self.doc().text().len_chars();
+        let transaction =
+            Transaction::change(self.doc().text(), [(0, len, Some(text.into()))].into_iter());
+        self.apply(transaction);
+        Ok(())
+    }
+
     // ---- persistence ----
 
     pub fn save(&mut self) -> Result<()> {
@@ -1500,6 +1525,37 @@ mod tests {
     }
 
     // ---- buffers ----
+
+    #[test]
+    fn replace_text_is_one_undoable_transaction() {
+        let path = temp_file(
+            "agent-replace",
+            "fn a() {}
+",
+        );
+        let mut ed = Editor::open(&path).unwrap();
+        ed.replace_text(
+            "fn a() { todo!() }
+fn b() {}
+"
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            text_of(&ed),
+            "fn a() { todo!() }
+fn b() {}
+"
+        );
+        assert!(ed.is_modified());
+        // One undo reverts the whole agent edit.
+        ed.undo();
+        assert_eq!(
+            text_of(&ed),
+            "fn a() {}
+"
+        );
+    }
 
     #[test]
     fn open_buffer_adds_and_switches() {

@@ -132,6 +132,8 @@ pub struct App {
     pub editor: Editor,
     /// The workspace: root + ignore rules (file picker/explorer scope).
     pub workspace: Workspace,
+    /// The agent slice: session + UI transcript (docs/design/agent.md).
+    pub agent: crate::agent::AgentState,
     /// Toast queue.
     pub notifications: Notifications,
     /// Theme slice: active theme + follow source + probe cadence.
@@ -169,6 +171,7 @@ impl App {
         Self {
             editor,
             workspace: Workspace::new(std::env::current_dir().unwrap_or_default()),
+            agent: crate::agent::AgentState::new(crate::agent::AgentSettings::default()),
             notifications: Notifications::new(),
             theme: ThemeState::new(Theme::default(), crate::theme::resolve::Follow::Fixed),
             input: InputState {

@@ -93,6 +93,13 @@ pub enum AppAction {
     // ---- commands ----
     /// Run a registry command (translate it to actions, dispatch those).
     Run(Command),
+    // ---- agent (docs/design/agent.md) ----
+    /// Send a prompt to the session (spawning it lazily).
+    AgentPrompt(String),
+    /// Abort the current run.
+    AgentAbort,
+    /// One runtime event (streamed delta, tool lifecycle, run end).
+    Agent(eggplant_agent::AgentEvent),
 
     // ---- lifecycle ----
     Quit,
@@ -154,8 +161,14 @@ impl Compositor {
     pub fn dispatch(&mut self, action: AppAction, emitter: Option<&str>, app: &mut App) {
         let event = ActionEvent::of(&action);
         self.apply(action, emitter, app);
-        // Broadcast the fact: observers (the explorer's buffer sync, …)
-        // react to shared-state changes without dispatch knowing them.
+        self.broadcast(event, app);
+    }
+
+    /// Broadcast a fact to every layer's `observe`. Dispatch uses it after
+    /// applying; the agent host drain uses it directly when a host call
+    /// mutated buffers (there is no AppAction for "the agent's tool
+    /// edited this buffer" — the serving IS the mutation).
+    pub fn broadcast(&mut self, event: ActionEvent, app: &App) {
         for layer in self.layers_mut() {
             layer.observe(event, app);
         }
@@ -271,6 +284,26 @@ impl Compositor {
 
             AppAction::Run(command) => self.execute(command, app),
 
+            AppAction::AgentPrompt(text) => {
+                let cwd = app.workspace.root.clone();
+                match app.agent.ensure_session(cwd) {
+                    Ok(session) => {
+                        session.prompt(text.clone());
+                        app.agent
+                            .transcript
+                            .push(crate::agent::ChatItem::User(text));
+                    }
+                    Err(message) => app
+                        .notifications
+                        .push(crate::layers::notification::Notification::error(message)),
+                }
+            }
+            AppAction::AgentAbort => {
+                if let Some(session) = app.agent.session() {
+                    session.abort();
+                }
+            }
+            AppAction::Agent(event) => app.agent.apply(&event),
             AppAction::Quit => app.request_quit(),
         }
     }

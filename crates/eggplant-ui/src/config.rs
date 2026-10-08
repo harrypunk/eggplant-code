@@ -37,6 +37,7 @@ pub struct Config {
     pub theme: Option<String>,
     pub keys: Keys,
     pub files: Files,
+    pub agent: crate::agent::AgentSettings,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -100,6 +101,7 @@ impl Config {
         if !self.files.ignore.is_empty() {
             app.workspace.set_ignore_patterns(&self.files.ignore);
         }
+        app.agent.settings = self.agent;
         for warning in warnings {
             app.notifications
                 .push(Notification::warn(format!("config: {warning}")));

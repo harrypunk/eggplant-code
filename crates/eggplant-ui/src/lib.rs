@@ -7,6 +7,7 @@
 //! - `compositor.rs` — z-ordered layers, layout, focus, key dispatch.
 
 pub mod action;
+pub mod agent;
 pub mod app;
 pub mod commands;
 pub mod components;

@@ -10,7 +10,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event};
 use ratatui::layout::Rect;
 
-use crate::action::Handled;
+use crate::action::{AppAction, Handled};
 use crate::app::App;
 use crate::compositor::Compositor;
 use crate::startup::{self, StartupTarget};
@@ -39,12 +39,47 @@ fn event_loop(
         if app.theme.tick() {
             refresh_theme(app, &mut probe);
         }
+        drain_agent(app, compositor);
 
         if let Some(event) = next_event()? {
             handle_event(event, app, compositor, &mut probe);
         }
     }
     Ok(())
+}
+
+/// The agent drain: runtime events become dispatched actions; host calls
+/// are served synchronously against the live editor (single-threaded
+/// mutation), and buffer-changing ones broadcast `BufferChanged` so the
+/// explorer/topbar stay truthful.
+fn drain_agent(app: &mut App, compositor: &mut Compositor) {
+    let Some(session) = app.agent.session() else {
+        return;
+    };
+    // Collect first: try_recv borrows app.agent; serving needs &mut App.
+    let mut messages = Vec::new();
+    while let Some(message) = session.try_recv() {
+        messages.push(message);
+    }
+    for message in messages {
+        match message {
+            eggplant_agent::SessionMsg::Event(event) => {
+                compositor.dispatch(AppAction::Agent(event), None, app);
+            }
+            eggplant_agent::SessionMsg::Host(request) => {
+                let touches_buffers = matches!(
+                    request.call,
+                    eggplant_agent::HostCall::Write { .. } | eggplant_agent::HostCall::Edit { .. }
+                );
+                let result = crate::agent::serve_host(app, &request.call);
+                let changed = touches_buffers && result.is_ok();
+                request.respond(result);
+                if changed {
+                    compositor.broadcast(crate::action::ActionEvent::BufferChanged, app);
+                }
+            }
+        }
+    }
 }
 
 /// Re-derive the theme if the terminal flipped light/dark.
