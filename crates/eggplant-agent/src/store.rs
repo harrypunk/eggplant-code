@@ -16,7 +16,7 @@ impl SessionStore {
     /// The store for a workspace root; `None` when there is no home.
     pub fn for_workspace(root: &Path) -> Option<Self> {
         Some(Self::at(
-            agent_dir()?.join("sessions").join(file_name(root)),
+            data_root()?.join("sessions").join(file_name(root)),
         ))
     }
 
@@ -61,7 +61,7 @@ impl SessionStore {
 }
 
 /// The data root: `$EGGPLANT_HOME` else `~/.eggplant`.
-pub(crate) fn agent_dir() -> Option<PathBuf> {
+pub fn data_root() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("EGGPLANT_HOME") {
         return Some(PathBuf::from(dir));
     }

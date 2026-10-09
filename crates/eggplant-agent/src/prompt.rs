@@ -5,6 +5,23 @@ use std::path::Path;
 
 use crate::tool::Tool;
 
+/// The prompt template, embedded. Placeholders: `{cwd}`, `{tools}`,
+/// `{guidelines}`, `{project}`. Override at runtime without rebuilding:
+/// `$EGGPLANT_HOME/system.md` shadows this file (edit + restart).
+const DEFAULT_TEMPLATE: &str = include_str!("system_prompt.md");
+
+/// The effective template: the runtime override when present, else the
+/// embedded default.
+fn template() -> std::borrow::Cow<'static, str> {
+    let override_path = crate::store::data_root()
+        .map(|root| root.join("system.md"))
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    match override_path {
+        Some(text) => std::borrow::Cow::Owned(text),
+        None => std::borrow::Cow::Borrowed(DEFAULT_TEMPLATE),
+    }
+}
+
 /// Build the system prompt for a run.
 pub fn build_system_prompt(tools: &[Box<dyn Tool>], cwd: &Path, agents_md: Option<&str>) -> String {
     let tool_list = tools
@@ -21,19 +38,15 @@ pub fn build_system_prompt(tools: &[Box<dyn Tool>], cwd: &Path, agents_md: Optio
     let project = agents_md
         .map(|md| {
             format!(
-                "\n\nProject instructions (AGENTS.md) — follow them exactly:\n\n<project-instructions>\n{md}\n</project-instructions>"
+                "\nProject instructions (AGENTS.md) — follow them exactly:\n\n<project-instructions>\n{md}\n</project-instructions>\n"
             )
         })
         .unwrap_or_default();
-    format!(
-        "You are the built-in editing agent of eggplant-code, working on the user's project at {}.\n\
-         The user's editor is your hands: your read/write/edit/grep/find tools operate on the live \
-         editor state — edits land in the user's buffers immediately and can be undone by the user. \
-         Be precise, be brief, and prefer small focused changes.\n\n\
-         Tools:\n{tool_list}\n\n\
-         Guidelines:\n{guidelines}{project}",
-        cwd.display()
-    )
+    template()
+        .replace("{cwd}", &cwd.display().to_string())
+        .replace("{tools}", &tool_list)
+        .replace("{guidelines}", &guidelines)
+        .replace("{project}", &project)
 }
 
 #[cfg(test)]

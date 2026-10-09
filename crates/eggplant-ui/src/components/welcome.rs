@@ -10,19 +10,22 @@ use ratatui::text::Line;
 use crate::element::Element;
 use crate::stylesheet::{StyleClass, Stylesheet};
 
-/// ANSI-shadow block letters spelling EGGPLANT.
-const LOGO: &str = "\
- ███████╗ ██████╗  ██████╗ ██████╗ ██╗      █████╗ ███╗   ██╗████████╗
- ██╔════╝██╔════╝ ██╔════╝ ██╔══██╗██║     ██╔══██╗████╗  ██║╚══██╔══╝
- █████╗  ██║  ███╗██║  ███╗██████╔╝██║     ███████║██╔██╗ ██║   ██║
- ██╔══╝  ██║   ██║██║   ██║██╔═══╝ ██║     ██╔══██║██║╚██╗██║   ██║
- ███████╗╚██████╔╝╚██████╔╝██║     ███████╗██║  ██║██║ ╚████║   ██║
- ╚══════╝ ╚═════╝  ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝";
+/// ANSI-shadow block letters spelling EGGPLANT, embedded. Override at
+/// runtime without rebuilding: `$EGGPLANT_HOME/welcome.txt` shadows it.
+const DEFAULT_LOGO: &str = include_str!("welcome_logo.txt");
 
-const LOGO_WIDTH: usize = 73;
-const LOGO_HEIGHT: usize = 6;
-/// Total block height: logo + blank + version + blank + hints.
-const BLOCK_HEIGHT: u16 = (LOGO_HEIGHT + 4) as u16;
+/// The effective logo: runtime override when present, else embedded.
+fn logo() -> std::borrow::Cow<'static, str> {
+    let override_path = std::env::var("EGGPLANT_HOME")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.eggplant")))
+        .map(|root| std::path::PathBuf::from(root).join("welcome.txt"))
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    match override_path {
+        Some(text) => std::borrow::Cow::Owned(text),
+        None => std::borrow::Cow::Borrowed(DEFAULT_LOGO),
+    }
+}
 
 /// Everything the welcome screen needs — nothing more.
 pub struct WelcomeProps {
@@ -30,11 +33,15 @@ pub struct WelcomeProps {
 }
 
 pub fn view(props: &WelcomeProps, area: Rect, sheet: &Stylesheet) -> Element {
-    let fits = area.width >= LOGO_WIDTH as u16 && area.height >= BLOCK_HEIGHT + 2;
+    let logo = logo();
+    // Fit check derived from the (possibly overridden) logo's shape.
+    let logo_width = logo.lines().map(|l| l.chars().count()).max().unwrap_or(0) as u16;
+    let block_height = logo.lines().count() as u16 + 4;
+    let fits = area.width >= logo_width && area.height >= block_height + 2;
     let mut lines: Vec<Line> = Vec::new();
     if fits {
         lines.extend(
-            LOGO.lines()
+            logo.lines()
                 .map(|l| Line::from(sheet.span(StyleClass::Accent, l.to_owned()))),
         );
     } else {

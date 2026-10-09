@@ -45,9 +45,9 @@ pub enum KeySource {
 }
 
 impl AuthStore {
-    /// The default location: `$EGGPLANT_HOME/agent/auth.toml`.
+    /// The default location: `$EGGPLANT_HOME/auth.toml`.
     pub fn load_default() -> Option<Self> {
-        Some(Self::load(store::agent_dir()?.join("auth.toml")))
+        Some(Self::load(store::data_root()?.join("auth.toml")))
     }
 
     pub fn load(path: PathBuf) -> Self {

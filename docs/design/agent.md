@@ -208,14 +208,14 @@ read). No skills/extensions in v1; the composition seams are the same.
 ### Persistence and auth
 
 The session persists per workspace:
-`~/.eggplant/agent/sessions/<slug>-<fnv64(cwd)>.jsonl` — append-only,
+`~/.eggplant/sessions/<slug>-<fnv64(cwd)>.jsonl` — append-only,
 one JSON message per line, written as each message completes (survives
 crashes). Opening chat continues the session: `EnsureAgentSession` runs
 on open, the runtime loads the store and emits `Restored`, and the UI
 rebuilds its transcript (tool results fold into their chips). `Space a n`
 starts a fresh conversation (clears transcript + store).
 
-Keys live in `~/.eggplant/agent/auth.toml` (`[keys] qwen = "sk-…"`,
+Keys live in `~/.eggplant/auth.toml` (`[keys] qwen = "sk-…"`,
 `[urls] qwen = "https://…"` for endpoint overrides), hand-editable or
 managed in-editor via `Space a a`: pick a provider, edit the prefilled
 endpoint, paste the key — the pair is validated against the provider
