@@ -14,6 +14,7 @@ use tokio::sync::mpsc;
 use crate::host::HostClient;
 use crate::provider::Provider;
 use crate::session::{AgentCommand, AgentEvent};
+use crate::store::SessionStore;
 use crate::tool::Tool;
 use crate::types::{ChatEvent, ChatRequest, Message, Role, ToolCall};
 
@@ -26,8 +27,9 @@ pub struct AgentRuntime {
     system_prompt: String,
     host: HostClient,
     events: mpsc::UnboundedSender<AgentEvent>,
-    /// The model-facing transcript.
+    /// The model-facing transcript (persisted to `store` as it grows).
     messages: Vec<Message>,
+    store: Option<SessionStore>,
     /// Prompts that arrived mid-run; drained when the run settles.
     queued: VecDeque<String>,
 }
@@ -39,25 +41,54 @@ impl AgentRuntime {
         system_prompt: String,
         host: HostClient,
         events: mpsc::UnboundedSender<AgentEvent>,
+        store: Option<SessionStore>,
         _cwd: PathBuf,
     ) -> Self {
+        // Continue the persisted session if there is one.
+        let messages = store.as_ref().map(|s| s.load()).unwrap_or_default();
         Self {
+            messages,
             provider,
             tools,
             system_prompt,
             host,
             events,
-            messages: Vec::new(),
+            store,
             queued: VecDeque::new(),
         }
     }
 
+    /// Transcript append + persist (write at event time; a failed write
+    /// never breaks the run — persistence is best-effort).
+    fn record(&mut self, message: Message) {
+        if let Some(store) = &self.store {
+            let _ = store.append(&message);
+        }
+        self.messages.push(message);
+    }
+
     /// The main task: process commands forever.
     pub async fn run(mut self, mut commands: mpsc::UnboundedReceiver<AgentCommand>) {
+        // Continue-UX: tell the UI what we loaded so it can rebuild the
+        // transcript before the user types.
+        if !self.messages.is_empty() {
+            self.emit(AgentEvent::Restored {
+                messages: self.messages.clone(),
+            })
+            .await;
+        }
         while let Some(command) = commands.recv().await {
             match command {
                 AgentCommand::Prompt(text) => self.run_prompt(text, &mut commands).await,
                 AgentCommand::Abort => {} // idle: nothing to abort
+                AgentCommand::NewChat => {
+                    self.messages.clear();
+                    self.queued.clear();
+                    if let Some(store) = &self.store {
+                        store.clear();
+                    }
+                    self.emit(AgentEvent::Cleared).await;
+                }
             }
         }
     }
@@ -72,7 +103,7 @@ impl AgentRuntime {
         commands: &mut mpsc::UnboundedReceiver<AgentCommand>,
     ) {
         self.emit(AgentEvent::RunStarted).await;
-        self.messages.push(Message::user(text));
+        self.record(Message::user(text));
         let mut aborted = false;
         for _turn in 0..MAX_TURNS {
             let Some(calls) = self.stream_turn(commands, &mut aborted).await else {
@@ -134,57 +165,65 @@ impl AgentRuntime {
             messages: self.messages.clone(),
             tools: self.tools.iter().map(|t| t.declaration()).collect(),
         };
-        let stream = self.provider.stream(&request);
-        futures::pin_mut!(stream);
-        let mut text = String::new();
-        let mut calls = Vec::new();
-        loop {
-            let event = tokio::select! {
-                event = stream.next() => event,
-                command = commands.recv() => {
-                    match command {
-                        Some(AgentCommand::Abort) => {
-                            *aborted = true;
-                            self.emit(AgentEvent::Aborted).await;
+        // The stream borrows `self.provider` for its whole scope — keep
+        // that scope in a block so recording (a &mut self) can follow.
+        let (text, calls, failed) = {
+            let stream = self.provider.stream(&request);
+            futures::pin_mut!(stream);
+            let mut text = String::new();
+            let mut calls = Vec::new();
+            let mut failed = false;
+            loop {
+                let event = tokio::select! {
+                    event = stream.next() => event,
+                    command = commands.recv() => {
+                        match command {
+                            Some(AgentCommand::Abort) => {
+                                *aborted = true;
+                                self.emit(AgentEvent::Aborted).await;
+                            }
+                            Some(AgentCommand::Prompt(text)) => self.queued.push_back(text),
+                            // Mid-run NewChat: queued prompts die with the old
+                            // transcript; the clear happens when the run
+                            // settles (abort first for an immediate reset).
+                            Some(AgentCommand::NewChat) => self.queued.clear(),
+                            None => {}
                         }
-                        Some(AgentCommand::Prompt(text)) => self.queued.push_back(text),
-                        None => {}
+                        continue;
                     }
-                    continue;
-                }
-            };
-            let Some(event) = event else { break };
-            match event {
-                ChatEvent::TextDelta(delta) => {
-                    text.push_str(&delta);
-                    self.emit(AgentEvent::TextDelta(delta)).await;
-                }
-                ChatEvent::ToolCall(call) => calls.push(call),
-                ChatEvent::Done => break,
-                ChatEvent::Error(message) => {
-                    self.emit(AgentEvent::Error(message.clone())).await;
-                    self.messages.push(Message {
-                        role: Role::Assistant,
-                        text,
-                        ..Message::default()
-                    });
-                    return None;
+                };
+                let Some(event) = event else { break };
+                match event {
+                    ChatEvent::TextDelta(delta) => {
+                        text.push_str(&delta);
+                        self.emit(AgentEvent::TextDelta(delta)).await;
+                    }
+                    ChatEvent::ToolCall(call) => calls.push(call),
+                    ChatEvent::Done => break,
+                    ChatEvent::Error(message) => {
+                        self.emit(AgentEvent::Error(message)).await;
+                        failed = true;
+                        break;
+                    }
                 }
             }
-        }
-        let tool_calls = calls.clone();
-        self.messages.push(Message {
+            (text, calls, failed)
+        };
+        self.record(Message {
             role: Role::Assistant,
             text,
-            tool_calls: calls,
+            tool_calls: calls.clone(),
             ..Message::default()
         });
-        Some(tool_calls)
+        if failed {
+            return None;
+        }
+        Some(calls)
     }
 }
 
 /// A short human-facing summary of a tool call for the UI chips.
-fn summarize_call(call: &ToolCall) -> String {
+pub fn summarize_call(call: &ToolCall) -> String {
     let path = call
         .args
         .get("path")

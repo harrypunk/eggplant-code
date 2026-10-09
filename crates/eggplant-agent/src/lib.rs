@@ -9,6 +9,7 @@ pub mod host;
 pub mod prompt;
 pub mod provider;
 pub mod session;
+pub mod store;
 pub mod tool;
 pub mod tools;
 pub mod types;

@@ -213,6 +213,11 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
                 description: "toggle chat window",
                 command: "agent.toggle",
             },
+            KeyNode::Leaf {
+                key: 'n',
+                description: "new session",
+                command: "agent.new",
+            },
         ],
     },
     KeyNode::Group {
@@ -385,18 +390,28 @@ pub fn default_registry() -> Registry {
             vec![AppAction::CycleTheme]
         }),
         Command::app("agent.chat", "Chat with the agent (popup)", |_app| {
-            vec![AppAction::PushLayer(crate::layers::chat::ChatModal::new())]
+            vec![
+                AppAction::EnsureAgentSession,
+                AppAction::PushLayer(crate::layers::chat::ChatModal::new()),
+            ]
         }),
         Command::app("agent.abort", "Abort the running agent", |_app| {
             vec![AppAction::AgentAbort]
         }),
+        Command::app("agent.new", "Start a new agent session", |_app| {
+            vec![AppAction::AgentNewChat]
+        }),
         Command::app("agent.toggle", "Toggle the agent chat window", |_app| {
-            vec![AppAction::ToggleLayer {
-                id: crate::layers::chat::PANEL_ID,
-                make: |_app| {
-                    Ok(crate::layers::chat::ChatPanel::new() as Box<dyn crate::compositor::Layer>)
+            vec![
+                AppAction::EnsureAgentSession,
+                AppAction::ToggleLayer {
+                    id: crate::layers::chat::PANEL_ID,
+                    make: |_app| {
+                        Ok(crate::layers::chat::ChatPanel::new()
+                            as Box<dyn crate::compositor::Layer>)
+                    },
                 },
-            }]
+            ]
         }),
         Command::app(
             "demo.dialog",

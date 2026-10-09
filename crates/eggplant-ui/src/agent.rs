@@ -158,8 +158,45 @@ impl AgentState {
                     .push(ChatItem::Assistant("— aborted".into()));
             }
             AgentEvent::RunFinished { .. } => self.running = false,
+            AgentEvent::Restored { messages } => {
+                self.transcript = rebuild_transcript(messages);
+            }
+            AgentEvent::Cleared => self.transcript.clear(),
         }
     }
+}
+
+/// Project the persisted model-facing transcript back into UI items.
+fn rebuild_transcript(messages: &[eggplant_agent::Message]) -> Vec<ChatItem> {
+    // Tool results keyed by call id (for the chip's ✓/✗).
+    let results: std::collections::HashMap<&str, bool> = messages
+        .iter()
+        .filter_map(|m| m.tool_call_id.as_deref().map(|id| (id, m.is_error)))
+        .collect();
+    messages
+        .iter()
+        .flat_map(|message| {
+            use eggplant_agent::Role;
+            match message.role {
+                Role::User => vec![ChatItem::User(message.text.clone())],
+                Role::Assistant => {
+                    let mut items = Vec::new();
+                    if !message.text.is_empty() {
+                        items.push(ChatItem::Assistant(message.text.clone()));
+                    }
+                    for call in &message.tool_calls {
+                        items.push(ChatItem::Tool {
+                            id: call.id.clone(),
+                            summary: eggplant_agent::agent::summarize_call(call),
+                            is_error: results.get(call.id.as_str()).copied().or(Some(false)),
+                        });
+                    }
+                    items
+                }
+                Role::Tool => vec![], // folded into the chip's status
+            }
+        })
+        .collect()
 }
 
 /// Serve one host call against the live editor + workspace. Runs on the
@@ -277,4 +314,37 @@ fn open_in_editor(app: &mut App, path: &Path) -> Result<(), String> {
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eggplant_agent::{Message, ToolCall};
+
+    #[test]
+    fn restored_transcript_rebuilds_ui_items() {
+        let messages = vec![
+            Message::user("fix the test"),
+            Message {
+                role: eggplant_agent::Role::Assistant,
+                text: "on it".into(),
+                tool_calls: vec![ToolCall {
+                    id: "t1".into(),
+                    name: "edit".into(),
+                    args: serde_json::json!({"path": "a.rs", "edits": []}),
+                }],
+                ..Message::default()
+            },
+            Message::tool_result("t1", "applied 1 edit".into(), false),
+            Message::user("thanks"),
+        ];
+        let items = rebuild_transcript(&messages);
+        assert!(matches!(&items[0], ChatItem::User(t) if t == "fix the test"));
+        assert!(matches!(&items[1], ChatItem::Assistant(t) if t == "on it"));
+        assert!(
+            matches!(&items[2], ChatItem::Tool { summary, is_error: Some(false), .. } if summary == "edit a.rs")
+        );
+        assert!(matches!(&items[3], ChatItem::User(t) if t == "thanks"));
+        assert_eq!(items.len(), 4, "tool results fold into chips, not items");
+    }
 }

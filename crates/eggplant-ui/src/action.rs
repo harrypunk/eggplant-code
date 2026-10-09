@@ -94,8 +94,14 @@ pub enum AppAction {
     /// Run a registry command (translate it to actions, dispatch those).
     Run(Command),
     // ---- agent (docs/design/agent.md) ----
+    /// Spawn the session if absent (chat views do this on open so a
+    /// persisted transcript restores immediately). Resolve failures are
+    /// quiet here — they surface on the first prompt instead.
+    EnsureAgentSession,
     /// Send a prompt to the session (spawning it lazily).
     AgentPrompt(String),
+    /// Clear transcript + persisted store (fresh conversation).
+    AgentNewChat,
     /// Abort the current run.
     AgentAbort,
     /// One runtime event (streamed delta, tool lifecycle, run end).
@@ -284,6 +290,17 @@ impl Compositor {
 
             AppAction::Run(command) => self.execute(command, app),
 
+            AppAction::EnsureAgentSession => {
+                let cwd = app.workspace.root.clone();
+                let _ = app.agent.ensure_session(cwd);
+            }
+            AppAction::AgentNewChat => {
+                if let Some(session) = app.agent.session() {
+                    session.new_chat();
+                } else {
+                    app.agent.transcript.clear();
+                }
+            }
             AppAction::AgentPrompt(text) => {
                 let cwd = app.workspace.root.clone();
                 match app.agent.ensure_session(cwd) {

@@ -17,6 +17,8 @@ use crate::tool::default_tools;
 pub enum AgentCommand {
     Prompt(String),
     Abort,
+    /// Clear transcript + persisted store (fresh conversation).
+    NewChat,
 }
 
 /// Everything the runtime tells the UI.
@@ -42,6 +44,13 @@ pub enum AgentEvent {
     RunFinished {
         aborted: bool,
     },
+    /// The session continued from disk: the loaded transcript (emitted
+    /// once, before any command is processed).
+    Restored {
+        messages: Vec<crate::types::Message>,
+    },
+    /// NewChat processed: transcript and store are empty.
+    Cleared,
 }
 
 /// One item on the UI drain channel: an agent event, or a host call the
@@ -101,6 +110,7 @@ impl AgentSession {
             });
         });
 
+        let store = crate::store::SessionStore::for_workspace(&cwd);
         let tools = default_tools();
         let system_prompt = {
             let agents_md = std::fs::read_to_string(cwd.join("AGENTS.md")).ok();
@@ -112,6 +122,7 @@ impl AgentSession {
             system_prompt,
             crate::host::HostClient::new(host_tx),
             event_tx,
+            store,
             cwd,
         );
         std::thread::spawn(move || {
@@ -134,6 +145,10 @@ impl AgentSession {
 
     pub fn abort(&self) {
         let _ = self.commands.send(AgentCommand::Abort);
+    }
+
+    pub fn new_chat(&self) {
+        let _ = self.commands.send(AgentCommand::NewChat);
     }
 
     /// Non-blocking drain for the UI event loop.
