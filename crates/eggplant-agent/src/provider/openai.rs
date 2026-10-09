@@ -27,6 +27,7 @@ impl OpenAi {
 
     fn body(&self, request: &ChatRequest) -> Value {
         let mut messages = vec![json!({ "role": "system", "content": request.system })];
+        let mut ids = IdRemap::default();
         messages.extend(
             request
                 .messages
@@ -37,7 +38,7 @@ impl OpenAi {
                 .filter(|m| {
                     !(m.role == Role::Assistant && m.text.is_empty() && m.tool_calls.is_empty())
                 })
-                .map(wire_message),
+                .map(|m| wire_message(m, &mut ids)),
         );
         json!({
             "model": self.config.model,
@@ -55,7 +56,34 @@ impl OpenAi {
     }
 }
 
-fn wire_message(message: &Message) -> Value {
+/// Reassigns tool-call ids to be unique across the whole conversation.
+/// Some providers (kimi) mint per-turn ids like `find:1`, which collide
+/// once the history holds two turns — and strict providers reject the
+/// request. Each call occurrence gets a fresh id; each tool result takes
+/// the id of the latest matching call, so call↔result pairing survives.
+#[derive(Default)]
+struct IdRemap {
+    latest: std::collections::HashMap<String, String>,
+    next: usize,
+}
+
+impl IdRemap {
+    fn call(&mut self, old: &str) -> String {
+        self.next += 1;
+        let fresh = format!("call_{}", self.next);
+        self.latest.insert(old.to_string(), fresh.clone());
+        fresh
+    }
+
+    fn result(&self, old: &str) -> String {
+        self.latest
+            .get(old)
+            .cloned()
+            .unwrap_or_else(|| old.to_string())
+    }
+}
+
+fn wire_message(message: &Message, ids: &mut IdRemap) -> Value {
     match message.role {
         Role::User => json!({ "role": "user", "content": message.text }),
         Role::Assistant => {
@@ -72,7 +100,7 @@ fn wire_message(message: &Message) -> Value {
                     .iter()
                     .map(|c| {
                         json!({
-                            "id": c.id,
+                            "id": ids.call(&c.id),
                             "type": "function",
                             "function": {
                                 "name": c.name,
@@ -86,7 +114,10 @@ fn wire_message(message: &Message) -> Value {
         }
         Role::Tool => json!({
             "role": "tool",
-            "tool_call_id": message.tool_call_id,
+            "tool_call_id": message
+                .tool_call_id
+                .as_deref()
+                .map(|id| ids.result(id)),
             "content": message.text,
         }),
     }
@@ -206,6 +237,40 @@ mod tests {
         // system + user + user: the empty assistant message is gone.
         assert_eq!(messages.len(), 3);
         assert!(messages.iter().all(|m| m["role"] != "assistant"));
+    }
+
+    #[test]
+    fn duplicated_provider_tool_ids_are_remapped_unique() {
+        // Two turns where the provider reused the id "find:1" (kimi does).
+        let turn = |text: &str| {
+            let mut assistant = Message {
+                role: Role::Assistant,
+                ..Message::default()
+            };
+            assistant.text = text.to_string();
+            assistant.tool_calls.push(ToolCall {
+                id: "find:1".to_string(),
+                name: "find".to_string(),
+                args: serde_json::json!({}),
+            });
+            let mut result = Message {
+                role: Role::Tool,
+                ..Message::default()
+            };
+            result.tool_call_id = Some("find:1".to_string());
+            result.text = "hits".to_string();
+            vec![assistant, result]
+        };
+        let mut messages = vec![Message::user("go")];
+        messages.extend(turn("first"));
+        messages.extend(turn("second"));
+        let body = provider().body(&request(messages));
+        let wire = body["messages"].as_array().unwrap();
+        let id_a = wire[2]["tool_calls"][0]["id"].as_str().unwrap();
+        let id_b = wire[4]["tool_calls"][0]["id"].as_str().unwrap();
+        assert_ne!(id_a, id_b, "duplicated provider ids must be remapped");
+        assert_eq!(wire[3]["tool_call_id"], id_a, "result pairs its call");
+        assert_eq!(wire[5]["tool_call_id"], id_b, "result pairs its call");
     }
 
     #[test]
