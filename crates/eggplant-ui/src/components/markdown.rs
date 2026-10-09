@@ -6,7 +6,8 @@
 //! quotes, rules, links. Tables are NOT enabled — pipes pass through as
 //! literal text rather than half-rendering.
 
-use pulldown_cmark::{Event, HeadingLevel, Parser, Tag, TagEnd};
+use eggplant_core::SnippetHighlighter;
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -14,8 +15,14 @@ use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// Render markdown text to styled lines (the chat component's view of an
 /// assistant message).
-pub fn markdown_lines(text: &str, sheet: &Stylesheet) -> Vec<Line<'static>> {
-    let mut renderer = Renderer::new(sheet);
+/// `highlighter` enables syntax highlighting inside fenced code blocks;
+/// `None` (or an unknown language) falls back to plain code styling.
+pub fn markdown_lines(
+    text: &str,
+    sheet: &Stylesheet,
+    highlighter: Option<&dyn SnippetHighlighter>,
+) -> Vec<Line<'static>> {
+    let mut renderer = Renderer::new(sheet, highlighter);
     for event in Parser::new(text) {
         renderer.event(event);
     }
@@ -24,25 +31,28 @@ pub fn markdown_lines(text: &str, sheet: &Stylesheet) -> Vec<Line<'static>> {
 
 struct Renderer<'a> {
     sheet: &'a Stylesheet<'a>,
+    highlighter: Option<&'a dyn SnippetHighlighter>,
     lines: Vec<Line<'static>>,
     /// Spans of the line being built.
     current: Vec<Span<'static>>,
     /// Inline style stack (strong/emphasis/link push, their ends pop).
     styles: Vec<Style>,
-    in_code_block: bool,
+    /// Inside a fenced block: the fence language + accumulated source.
+    code_block: Option<(Option<String>, String)>,
     /// List nesting: None = bullet, Some(n) = next ordered number.
     lists: Vec<Option<u64>>,
     quote_depth: usize,
 }
 
 impl<'a> Renderer<'a> {
-    fn new(sheet: &'a Stylesheet<'a>) -> Self {
+    fn new(sheet: &'a Stylesheet<'a>, highlighter: Option<&'a dyn SnippetHighlighter>) -> Self {
         Self {
             sheet,
+            highlighter,
             lines: Vec::new(),
             current: Vec::new(),
             styles: vec![sheet.style(StyleClass::Text)],
-            in_code_block: false,
+            code_block: None,
             lists: Vec::new(),
             quote_depth: 0,
         }
@@ -94,9 +104,13 @@ impl<'a> Renderer<'a> {
                 let style = self.top().add_modifier(Modifier::ITALIC);
                 self.styles.push(style);
             }
-            Tag::CodeBlock(_) => {
+            Tag::CodeBlock(kind) => {
                 self.flush_paragraph();
-                self.in_code_block = true;
+                let language = match kind {
+                    CodeBlockKind::Fenced(lang) if !lang.is_empty() => Some(lang.to_string()),
+                    _ => None,
+                };
+                self.code_block = Some((language, String::new()));
             }
             Tag::List(start) => {
                 self.flush_paragraph();
@@ -143,7 +157,9 @@ impl<'a> Renderer<'a> {
                 self.styles.pop();
             }
             TagEnd::CodeBlock => {
-                self.in_code_block = false;
+                if let Some((language, code)) = self.code_block.take() {
+                    self.emit_code_block(language.as_deref(), &code);
+                }
                 self.flush_paragraph();
             }
             TagEnd::List(_) => {
@@ -161,22 +177,51 @@ impl<'a> Renderer<'a> {
     }
 
     fn text(&mut self, text: &str) {
-        if self.in_code_block {
-            // Code block text arrives as whole chunks with newlines:
-            // each source line becomes its own filled line.
-            let style = self.sheet.style(StyleClass::Code);
-            let mut rest = text;
-            while let Some(pos) = rest.find('\n') {
-                self.push_span(rest[..pos].to_string(), style);
-                self.flush_line();
-                rest = &rest[pos + 1..];
+        match &mut self.code_block {
+            // Fenced source accumulates raw; the whole block is
+            // highlighted at once when the fence closes.
+            Some((_, code)) => code.push_str(text),
+            None => {
+                let style = self.top();
+                self.push_span(text.to_string(), style);
             }
-            if !rest.is_empty() {
-                self.push_span(rest.to_string(), style);
+        }
+    }
+
+    /// A closed fence: syntax-highlight when the language is known and
+    /// an editor (its loader) is available; plain code style otherwise.
+    fn emit_code_block(&mut self, language: Option<&str>, code: &str) {
+        let code_style = self.sheet.style(StyleClass::Code);
+        let highlighted = language.and_then(|lang| {
+            self.highlighter
+                .and_then(|h| h.highlight_snippet(code, lang))
+        });
+        match highlighted {
+            Some(lines) => {
+                for spans in lines {
+                    let line: Vec<Span<'static>> = spans
+                        .into_iter()
+                        .map(|span| {
+                            // Syntax fg over the code surface bg.
+                            let style = span
+                                .scope
+                                .map(|scope| {
+                                    code_style
+                                        .patch(self.sheet.style(StyleClass::Syntax(Some(scope))))
+                                })
+                                .unwrap_or(code_style);
+                            Span::styled(span.text, style)
+                        })
+                        .collect();
+                    self.lines.push(Line::from(line));
+                }
             }
-        } else {
-            let style = self.top();
-            self.push_span(text.to_string(), style);
+            None => {
+                for line in code.lines() {
+                    self.lines
+                        .push(Line::from(Span::styled(line.to_string(), code_style)));
+                }
+            }
         }
     }
 
@@ -230,7 +275,7 @@ mod tests {
     fn render(md: &str) -> Vec<Line<'static>> {
         let theme = crate::theme::Theme::default();
         let sheet = Stylesheet::new(&theme);
-        markdown_lines(md, &sheet)
+        markdown_lines(md, &sheet, None)
     }
 
     fn plain(line: &Line) -> String {
@@ -267,6 +312,21 @@ mod tests {
         assert!(texts.iter().any(|t| t == "• a"));
         assert!(texts.iter().any(|t| t == "1. x"));
         assert!(texts.iter().any(|t| t == "2. y"));
+    }
+
+    #[test]
+    fn fenced_rust_block_highlights_with_editor() {
+        let editor = eggplant_core::Editor::scratch().unwrap();
+        let theme = crate::theme::Theme::default();
+        let sheet = Stylesheet::new(&theme);
+        let lines = markdown_lines("```rust\nfn main() {}\n```", &sheet, Some(&editor));
+        assert_eq!(plain(&lines[0]), "fn main() {}");
+        // At least one span got a syntax fg patched over the code bg.
+        assert!(
+            lines[0].spans.iter().any(|s| s.style.fg.is_some()),
+            "expected syntax-colored spans in {:?}",
+            lines[0]
+        );
     }
 
     #[test]

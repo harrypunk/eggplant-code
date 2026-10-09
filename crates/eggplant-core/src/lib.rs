@@ -18,7 +18,7 @@ pub mod peek;
 pub mod viewport;
 
 pub use editor::{BufferInfo, Editor, Motion, Register};
-pub use highlight::{HighlightedSpan, SyntaxScope};
+pub use highlight::{HighlightedLines, HighlightedSpan, SnippetHighlighter, SyntaxScope};
 pub use mode::Mode;
 pub use peek::Peek;
 

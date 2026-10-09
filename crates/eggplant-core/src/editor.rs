@@ -1359,10 +1359,42 @@ impl Editor {
     }
 }
 
+impl highlight::SnippetHighlighter for Editor {
+    /// Markdown fences, previews: highlight by language name. `None`
+    /// when the language is unknown — callers fall back to plain code.
+    fn highlight_snippet(&self, code: &str, language: &str) -> Option<highlight::HighlightedLines> {
+        let loader = self.backend.loader();
+        let language = loader.language_for_name(language)?;
+        let text = helix_core::Rope::from_str(code);
+        let syntax = syntax::Syntax::new(text.slice(..), language, &loader).ok()?;
+        Some(
+            (0..text.len_lines())
+                .map(|line| highlight::highlight_line(&text, &syntax, &loader, line))
+                .collect(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::highlight::SyntaxScope;
+    use crate::highlight::{SnippetHighlighter, SyntaxScope};
+
+    #[test]
+    fn snippet_highlight_scopes_rust_keywords() {
+        let editor = Editor::scratch().unwrap();
+        let lines = editor
+            .highlight_snippet("fn main() {}", "rust")
+            .expect("rust grammar");
+        assert!(
+            lines[0]
+                .iter()
+                .any(|span| span.scope == Some(crate::SyntaxScope::Keyword)),
+            "expected a keyword scope in {lines:?}"
+        );
+        // Unknown language → None (callers fall back to plain code style).
+        assert!(editor.highlight_snippet("x", "not-a-language").is_none());
+    }
 
     #[test]
     fn relative_display_strips_cwd() {

@@ -52,6 +52,18 @@ pub struct HighlightedSpan {
     pub scope: Option<SyntaxScope>,
 }
 
+/// A snippet's highlighted lines: one span vec per line.
+pub type HighlightedLines = Vec<Vec<HighlightedSpan>>;
+
+/// The one highlighting capability read-only surfaces need (chat
+/// markdown, previews). Segregated from the `Editor` facade so views
+/// depend on this trait, not on the whole editor.
+pub trait SnippetHighlighter {
+    /// Highlight a code snippet by language name. `None` when the
+    /// language is unknown — callers fall back to plain code styling.
+    fn highlight_snippet(&self, code: &str, language: &str) -> Option<HighlightedLines>;
+}
+
 /// Resolve a registered scope name (loader vocabulary) to a `SyntaxScope`.
 /// Unknown names (shouldn't happen — only registered names resolve) are plain.
 fn scope_of(highlight: Highlight, loader: &Loader) -> Option<SyntaxScope> {

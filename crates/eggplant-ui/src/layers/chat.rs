@@ -42,6 +42,7 @@ impl ChatView {
         ChatProps {
             title,
             items: &app.agent.transcript,
+            highlighter: &app.editor,
             input: &self.input,
             running: app.agent.running,
             scroll: self.scroll,

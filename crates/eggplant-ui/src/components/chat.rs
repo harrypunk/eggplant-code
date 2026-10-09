@@ -2,6 +2,7 @@
 //! and the right-side panel — one session, two presentations, one
 //! component (docs/design/agent.md).
 
+use eggplant_core::SnippetHighlighter;
 use ratatui::layout::{Constraint, Direction, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
@@ -13,6 +14,9 @@ use crate::stylesheet::{StyleClass, Stylesheet};
 pub struct ChatProps<'a> {
     pub title: &'a str,
     pub items: &'a [ChatItem],
+    /// Syntax highlighting for fenced code blocks — the one capability
+    /// the chat needs, not the whole editor facade.
+    pub highlighter: &'a dyn eggplant_core::SnippetHighlighter,
     pub input: &'a str,
     /// A run is in flight (spinner hint in the title).
     pub running: bool,
@@ -26,7 +30,11 @@ pub struct ChatProps<'a> {
 
 /// The transcript projected to styled lines: `> user`, assistant text,
 /// `⚙ tool ✓/✗/…` chips, blank line between blocks.
-fn transcript_lines(items: &[ChatItem], sheet: &Stylesheet) -> Vec<Line<'static>> {
+fn transcript_lines(
+    items: &[ChatItem],
+    sheet: &Stylesheet,
+    highlighter: &dyn SnippetHighlighter,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for item in items {
         match item {
@@ -38,7 +46,11 @@ fn transcript_lines(items: &[ChatItem], sheet: &Stylesheet) -> Vec<Line<'static>
             }
             ChatItem::Assistant(text) => {
                 // Assistant replies are markdown — render it styled.
-                lines.extend(crate::components::markdown::markdown_lines(text, sheet));
+                lines.extend(crate::components::markdown::markdown_lines(
+                    text,
+                    sheet,
+                    Some(highlighter),
+                ));
             }
             ChatItem::Thinking(text) => {
                 let style = sheet
@@ -69,7 +81,7 @@ fn transcript_lines(items: &[ChatItem], sheet: &Stylesheet) -> Vec<Line<'static>
 }
 
 pub fn view(props: &ChatProps, area: Rect, sheet: &Stylesheet) -> Element {
-    let lines = transcript_lines(props.items, sheet);
+    let lines = transcript_lines(props.items, sheet, props.highlighter);
     // Chat semantics: show the tail unless scrolled up. Slicing is by
     // logical lines (wrap affects display only) — v1 keeps it simple.
     let visible = area.height.saturating_sub(4) as usize; // borders + input
@@ -121,6 +133,7 @@ pub fn view(props: &ChatProps, area: Rect, sheet: &Stylesheet) -> Element {
 mod tests {
     use super::*;
     use crate::theme::Theme;
+    use eggplant_core::Editor;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -144,10 +157,11 @@ mod tests {
             .join("\n")
     }
 
-    fn props_of(items: &[ChatItem], scroll: usize) -> ChatProps<'_> {
+    fn props_of<'a>(items: &'a [ChatItem], scroll: usize, editor: &'a Editor) -> ChatProps<'a> {
         ChatProps {
             title: "agent",
             items,
+            highlighter: editor,
             input: "",
             running: false,
             scroll,
@@ -157,6 +171,7 @@ mod tests {
 
     #[test]
     fn transcript_renders_blocks_and_tool_marks() {
+        let editor = Editor::scratch().unwrap();
         let items = vec![
             ChatItem::User("fix the bug".into()),
             ChatItem::Tool {
@@ -166,7 +181,7 @@ mod tests {
             },
             ChatItem::Assistant("done".into()),
         ];
-        let out = paint(&props_of(&items, 0), 40, 10);
+        let out = paint(&props_of(&items, 0, &editor), 40, 10);
         assert!(out.contains("> fix the bug"), "{out}");
         assert!(out.contains("⚙ edit main.rs ✓"), "{out}");
         assert!(out.contains("done"), "{out}");
@@ -189,9 +204,10 @@ mod tests {
                 _ => false,
             }
         }
+        let editor = Editor::scratch().unwrap();
         let theme = Theme::default();
         let sheet = Stylesheet::new(&theme);
-        let mut props = props_of(&[], 0);
+        let mut props = props_of(&[], 0, &editor);
         props.focused = false;
         let tree = view(&props, Rect::new(0, 0, 40, 10), &sheet);
         assert!(!has_input(&tree), "unfocused chat must not place a cursor");
@@ -202,13 +218,14 @@ mod tests {
 
     #[test]
     fn scroll_shows_earlier_lines() {
+        let editor = Editor::scratch().unwrap();
         let items: Vec<ChatItem> = (0..20)
             .map(|i| ChatItem::Assistant(format!("line {i}")))
             .collect();
-        let tail = paint(&props_of(&items, 0), 30, 8);
+        let tail = paint(&props_of(&items, 0, &editor), 30, 8);
         assert!(tail.contains("line 19"), "{tail}");
         // 40 transcript lines (text + blank per item); scroll 38 → the top.
-        let scrolled = paint(&props_of(&items, 38), 30, 8);
+        let scrolled = paint(&props_of(&items, 38, &editor), 30, 8);
         assert!(scrolled.contains("line 0"), "{scrolled}");
         assert!(!scrolled.contains("line 19"), "{scrolled}");
     }
