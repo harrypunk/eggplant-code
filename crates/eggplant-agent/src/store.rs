@@ -61,7 +61,7 @@ impl SessionStore {
 }
 
 /// The data root: `$EGGPLANT_HOME` else `~/.eggplant`.
-fn agent_dir() -> Option<PathBuf> {
+pub(crate) fn agent_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("EGGPLANT_HOME") {
         return Some(PathBuf::from(dir));
     }

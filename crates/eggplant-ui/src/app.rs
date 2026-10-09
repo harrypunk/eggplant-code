@@ -134,6 +134,12 @@ pub struct App {
     pub workspace: Workspace,
     /// The agent slice: session + UI transcript (docs/design/agent.md).
     pub agent: crate::agent::AgentState,
+    /// Background threads → dispatch (validated keys, …). Data-only
+    /// `BgEvent`s; the runner drains and maps them to actions.
+    bg: (
+        std::sync::mpsc::Sender<crate::action::BgEvent>,
+        std::sync::mpsc::Receiver<crate::action::BgEvent>,
+    ),
     /// Toast queue.
     pub notifications: Notifications,
     /// Theme slice: active theme + follow source + probe cadence.
@@ -149,6 +155,16 @@ pub struct App {
 }
 
 impl App {
+    /// Clone of the background-effects sender (for validation threads).
+    pub fn bg_sender(&self) -> std::sync::mpsc::Sender<crate::action::BgEvent> {
+        self.bg.0.clone()
+    }
+
+    /// Non-blocking drain of background events (the runner calls this).
+    pub fn try_recv_bg(&self) -> Option<crate::action::BgEvent> {
+        self.bg.1.try_recv().ok()
+    }
+
     // ---- overlay selectors: how active features decorate the editor ----
     // Narrow, stable queries; new overlay features (flash, multi-cursor…)
     // extend these arms — the editor surface and component never change.
@@ -172,6 +188,7 @@ impl App {
             editor,
             workspace: Workspace::new(std::env::current_dir().unwrap_or_default()),
             agent: crate::agent::AgentState::new(crate::agent::AgentSettings::default()),
+            bg: std::sync::mpsc::channel(),
             notifications: Notifications::new(),
             theme: ThemeState::new(Theme::default(), crate::theme::resolve::Follow::Fixed),
             input: InputState {

@@ -21,6 +21,18 @@ use crate::layers::notification::Level;
 
 /// One shared-state change. Plain data: constructible in tests, loggable,
 /// replayable.
+/// Events from background threads (validation, …). Data-only, `Send`;
+/// the runner drains them and maps them onto actions in dispatch.
+pub enum BgEvent {
+    /// An auth key validation completed (agent.auth flow).
+    AuthValidated {
+        provider: String,
+        key: String,
+        base_url: String,
+        outcome: Result<(), String>,
+    },
+}
+
 pub enum AppAction {
     // ---- notifications ----
     Notify {
@@ -102,6 +114,19 @@ pub enum AppAction {
     AgentPrompt(String),
     /// Clear transcript + persisted store (fresh conversation).
     AgentNewChat,
+    /// Validate + persist an API key (agent auth flow).
+    AuthSubmit {
+        provider: String,
+        key: String,
+        base_url: String,
+    },
+    /// Validation completed (from a background thread via BgEvent).
+    AuthResult {
+        provider: String,
+        key: String,
+        base_url: String,
+        outcome: Result<(), String>,
+    },
     /// Abort the current run.
     AgentAbort,
     /// One runtime event (streamed delta, tool lifecycle, run end).
@@ -294,6 +319,64 @@ impl Compositor {
                 let cwd = app.workspace.root.clone();
                 let _ = app.agent.ensure_session(cwd);
             }
+            AppAction::AuthSubmit {
+                provider,
+                key,
+                base_url,
+            } => {
+                // Validate on a background thread; the result returns via
+                // the effects channel (I/O never blocks the UI thread).
+                let tx = app.bg_sender();
+                std::thread::spawn(move || {
+                    let outcome = eggplant_agent::validate_key(&base_url, &key);
+                    let _ = tx.send(BgEvent::AuthValidated {
+                        provider,
+                        key,
+                        base_url,
+                        outcome,
+                    });
+                });
+            }
+            AppAction::AuthResult {
+                provider,
+                key,
+                base_url,
+                outcome,
+            } => match outcome {
+                Ok(()) => {
+                    // Store the endpoint only when it overrides the preset
+                    // default (keep auth.toml minimal).
+                    let override_url = eggplant_agent::preset(&provider)
+                        .filter(|p| p.base_url != base_url)
+                        .map(|_| base_url.as_str());
+                    let saved = eggplant_agent::AuthStore::load_default()
+                        .map(|mut store| store.set(&provider, &key, override_url));
+                    match saved {
+                        Some(Ok(())) => {
+                            app.agent.auth_generation += 1;
+                            app.notifications.push(
+                                crate::layers::notification::Notification::with_level(
+                                    crate::layers::notification::Level::Info,
+                                    format!("{provider}: connected ✓ (key saved to auth.toml)"),
+                                ),
+                            );
+                        }
+                        _ => {
+                            app.notifications.push(
+                                crate::layers::notification::Notification::error(format!(
+                                    "{provider}: key valid but could not save auth.toml"
+                                )),
+                            );
+                        }
+                    }
+                }
+                Err(message) => {
+                    app.notifications
+                        .push(crate::layers::notification::Notification::error(format!(
+                            "{provider}: {message}"
+                        )));
+                }
+            },
             AppAction::AgentNewChat => {
                 if let Some(session) = app.agent.session() {
                     session.new_chat();

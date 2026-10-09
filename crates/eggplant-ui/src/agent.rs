@@ -25,12 +25,27 @@ impl AgentSettings {
     /// Every preset speaks OpenAI-compatible completions (one adapter);
     /// `custom` = any compatible endpoint with explicit base_url.
     pub fn resolve(&self) -> Result<ProviderConfig, String> {
-        let name = self.provider.clone().ok_or_else(|| {
-            format!(
-                "agent: set [agent] provider ({}, or \"custom\")",
-                eggplant_agent::preset_names()
-            )
-        })?;
+        // No explicit provider? Infer it from whoever has credentials
+        // (env var or auth.toml) — authenticating via Space a a IS the
+        // choice. Ambiguous or absent credentials get a pointed error.
+        let name = match self.provider.clone() {
+            Some(name) => name,
+            None => {
+                let store = eggplant_agent::AuthStore::load_default();
+                let configured: Vec<&str> = eggplant_agent::provider::PRESETS
+                    .iter()
+                    .filter(|preset| {
+                        std::env::var(preset.api_key_env)
+                            .ok()
+                            .filter(|k| !k.is_empty())
+                            .is_some()
+                            || store.as_ref().and_then(|s| s.get(preset.name)).is_some()
+                    })
+                    .map(|preset| preset.name)
+                    .collect();
+                pick_provider(&configured)?
+            }
+        };
         let (base_url, api_key_env, default_model) = match eggplant_agent::preset(&name) {
             Some(p) => (
                 p.base_url.to_string(),
@@ -59,12 +74,23 @@ impl AgentSettings {
                 ));
             }
         };
-        // Field-level overrides win over preset conventions.
-        let base_url = self.base_url.clone().unwrap_or(base_url);
+        // Field-level overrides win over preset conventions; the endpoint
+        // can also come from auth.toml (`[urls]`, set via Space a a).
+        let stored_url = eggplant_agent::AuthStore::load_default()
+            .and_then(|store| store.url_for(&name).map(str::to_owned));
+        let base_url = self.base_url.clone().or(stored_url).unwrap_or(base_url);
         let api_key_env = self.api_key_env.clone().unwrap_or(api_key_env);
         let model = self.model.clone().unwrap_or(default_model);
         let api_key = std::env::var(&api_key_env)
-            .map_err(|_| format!("agent: set ${api_key_env} (or [agent] api_key_env)"))?;
+            .ok()
+            .filter(|k| !k.is_empty())
+            .or_else(|| {
+                eggplant_agent::AuthStore::load_default()
+                    .and_then(|s| s.get(&name).map(String::from))
+            })
+            .ok_or_else(|| {
+                format!("agent: no key for {name} — set ${api_key_env} or authenticate (Space a a)")
+            })?;
         Ok(ProviderConfig {
             name,
             model,
@@ -95,6 +121,9 @@ pub struct AgentState {
     session: Option<AgentSession>,
     pub transcript: Vec<ChatItem>,
     pub running: bool,
+    /// Bumped when auth state changes (a key was saved) — the auth view
+    /// re-reads auth.toml only on a bump, not per action.
+    pub auth_generation: u64,
 }
 
 impl AgentState {
@@ -104,6 +133,7 @@ impl AgentState {
             session: None,
             transcript: Vec::new(),
             running: false,
+            auth_generation: 0,
         }
     }
 
@@ -163,6 +193,20 @@ impl AgentState {
             }
             AgentEvent::Cleared => self.transcript.clear(),
         }
+    }
+}
+
+/// Which provider when none is configured: the single authenticated one.
+fn pick_provider(configured: &[&str]) -> Result<String, String> {
+    match configured {
+        [only] => Ok((*only).to_string()),
+        [] => {
+            Err("agent: no provider authenticated — Space a a, or set [agent] provider".to_string())
+        }
+        many => Err(format!(
+            "agent: multiple providers authenticated ({}) — set [agent] provider",
+            many.join(", ")
+        )),
     }
 }
 
@@ -320,6 +364,15 @@ fn err(e: impl std::fmt::Display) -> String {
 mod tests {
     use super::*;
     use eggplant_agent::{Message, ToolCall};
+
+    #[test]
+    fn pick_provider_infers_from_credentials() {
+        assert_eq!(pick_provider(&["qwen"]).unwrap(), "qwen");
+        let err = pick_provider(&[]).unwrap_err();
+        assert!(err.contains("no provider authenticated"));
+        let err = pick_provider(&["qwen", "kimi"]).unwrap_err();
+        assert!(err.contains("multiple providers"));
+    }
 
     #[test]
     fn restored_transcript_rebuilds_ui_items() {

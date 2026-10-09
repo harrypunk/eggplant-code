@@ -40,12 +40,37 @@ fn event_loop(
             refresh_theme(app, &mut probe);
         }
         drain_agent(app, compositor);
+        drain_background(app, compositor);
 
         if let Some(event) = next_event()? {
             handle_event(event, app, compositor, &mut probe);
         }
     }
     Ok(())
+}
+
+/// Background threads (auth validation, …) post data-only events; each
+/// maps onto its action in dispatch.
+fn drain_background(app: &mut App, compositor: &mut Compositor) {
+    while let Some(event) = app.try_recv_bg() {
+        match event {
+            crate::action::BgEvent::AuthValidated {
+                provider,
+                key,
+                base_url,
+                outcome,
+            } => compositor.dispatch(
+                AppAction::AuthResult {
+                    provider,
+                    key,
+                    base_url,
+                    outcome,
+                },
+                None,
+                app,
+            ),
+        }
+    }
 }
 
 /// The agent drain: runtime events become dispatched actions; host calls
