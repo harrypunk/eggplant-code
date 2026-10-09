@@ -11,6 +11,7 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use crate::element::Lines;
 use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// Render markdown text to styled lines (the chat component's view of an
@@ -21,7 +22,7 @@ pub fn markdown_lines(
     text: &str,
     sheet: &Stylesheet,
     highlighter: Option<&dyn SnippetHighlighter>,
-) -> Vec<Line<'static>> {
+) -> Lines {
     let mut renderer = Renderer::new(sheet, highlighter);
     for event in Parser::new(text) {
         renderer.event(event);
@@ -32,7 +33,7 @@ pub fn markdown_lines(
 struct Renderer<'a> {
     sheet: &'a Stylesheet<'a>,
     highlighter: Option<&'a dyn SnippetHighlighter>,
-    lines: Vec<Line<'static>>,
+    lines: Lines,
     /// Spans of the line being built.
     current: Vec<Span<'static>>,
     /// Inline style stack (strong/emphasis/link push, their ends pop).
@@ -225,7 +226,7 @@ impl<'a> Renderer<'a> {
         }
     }
 
-    fn finish(mut self) -> Vec<Line<'static>> {
+    fn finish(mut self) -> Lines {
         self.flush_line();
         // Trim blank edges (blocks leave trailing empty lines).
         while self.lines.last().is_some_and(|l| l.spans.is_empty()) {
@@ -272,7 +273,7 @@ impl<'a> Renderer<'a> {
 mod tests {
     use super::*;
 
-    fn render(md: &str) -> Vec<Line<'static>> {
+    fn render(md: &str) -> Lines {
         let theme = crate::theme::Theme::default();
         let sheet = Stylesheet::new(&theme);
         markdown_lines(md, &sheet, None)

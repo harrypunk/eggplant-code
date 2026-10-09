@@ -8,7 +8,8 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use crate::agent::ChatItem;
-use crate::element::Element;
+use crate::components::markdown::markdown_lines;
+use crate::element::{Element, Lines};
 use crate::stylesheet::{StyleClass, Stylesheet};
 
 pub struct ChatProps<'a> {
@@ -16,7 +17,7 @@ pub struct ChatProps<'a> {
     pub items: &'a [ChatItem],
     /// Syntax highlighting for fenced code blocks — the one capability
     /// the chat needs, not the whole editor facade.
-    pub highlighter: &'a dyn eggplant_core::SnippetHighlighter,
+    pub highlighter: &'a dyn SnippetHighlighter,
     pub input: &'a str,
     /// A run is in flight (spinner hint in the title).
     pub running: bool,
@@ -34,7 +35,7 @@ fn transcript_lines(
     items: &[ChatItem],
     sheet: &Stylesheet,
     highlighter: &dyn SnippetHighlighter,
-) -> Vec<Line<'static>> {
+) -> Lines {
     let mut lines = Vec::new();
     for item in items {
         match item {
@@ -46,11 +47,7 @@ fn transcript_lines(
             }
             ChatItem::Assistant(text) => {
                 // Assistant replies are markdown — render it styled.
-                lines.extend(crate::components::markdown::markdown_lines(
-                    text,
-                    sheet,
-                    Some(highlighter),
-                ));
+                lines.extend(markdown_lines(text, sheet, Some(highlighter)));
             }
             ChatItem::Thinking(text) => {
                 let style = sheet
@@ -87,7 +84,7 @@ pub fn view(props: &ChatProps, area: Rect, sheet: &Stylesheet) -> Element {
     let visible = area.height.saturating_sub(4) as usize; // borders + input
     let end = lines.len().saturating_sub(props.scroll);
     let start = end.saturating_sub(visible);
-    let window: Vec<Line<'static>> = lines[start..end].to_vec();
+    let window: Lines = lines[start..end].to_vec();
 
     let title = if props.running {
         format!(" {} ● ", props.title)

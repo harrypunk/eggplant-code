@@ -11,7 +11,7 @@ use crate::action::{AppAction, Handled};
 use crate::agent::ModelListState;
 use crate::app::App;
 use crate::compositor::{Layer, LayerKind};
-use crate::element::Element;
+use crate::element::{Element, Lines};
 use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// A display row: a provider section header or a selectable model.
@@ -101,7 +101,7 @@ impl Layer for ModelPicker {
             height,
         );
 
-        let row_lines: Vec<Line<'static>> = rows
+        let row_lines: Lines = rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
@@ -143,7 +143,7 @@ impl Layer for ModelPicker {
             .selected
             .saturating_sub(visible / 2)
             .min(row_lines.len().saturating_sub(visible));
-        let mut lines: Vec<Line<'static>> = row_lines.into_iter().skip(scroll).collect();
+        let mut lines: Lines = row_lines.into_iter().skip(scroll).collect();
         if rows.is_empty() {
             lines.push(Line::from(Span::styled(
                 " no authenticated providers — Space a a",

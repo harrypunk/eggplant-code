@@ -17,12 +17,16 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 /// (`Line<'static>`), so no lifetime parameters leak into component or layer
 /// signatures; components clone the few short strings they display. Ratatui's
 /// `Line`/`Span`/`Style`/`Constraint`/`Rect` are reused as the vocabulary.
+/// Styled text lines — the currency of text views (components build
+/// them, the renderer paints them).
+pub type Lines = Vec<Line<'static>>;
+
 pub enum Element {
     /// Nothing to draw.
     Empty,
     /// Text lines (ratatui `Paragraph` equivalent).
     Text {
-        lines: Vec<Line<'static>>,
+        lines: Lines,
         style: Style,
         wrap: bool,
     },
@@ -61,7 +65,7 @@ pub enum Element {
 
 impl Element {
     /// Plain text lines.
-    pub fn text(lines: Vec<Line<'static>>) -> Self {
+    pub fn text(lines: Lines) -> Self {
         Element::Text {
             lines,
             style: Style::default(),

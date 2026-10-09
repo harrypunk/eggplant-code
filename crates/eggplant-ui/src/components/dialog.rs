@@ -4,7 +4,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
 
-use crate::element::Element;
+use crate::element::{Element, Lines};
 use crate::stylesheet::{StyleClass, Stylesheet};
 
 /// Centered rect of `percent_x`/`percent_y` within `area`.
@@ -25,7 +25,7 @@ fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 }
 
 /// An opaque, centered floating box with a title.
-fn float_box(title: &str, lines: Vec<Line<'static>>, area: Rect, sheet: &Stylesheet) -> Element {
+fn float_box(title: &str, lines: Lines, area: Rect, sheet: &Stylesheet) -> Element {
     Element::fixed(
         centered(area, 50, 30),
         Element::cleared(Element::Bordered {
