@@ -8,6 +8,10 @@ use serde_json::{Value, json};
 use super::{Provider, ProviderConfig, sse};
 use crate::types::{ChatEvent, ChatRequest, Message, Role, ToolCall};
 
+/// A proper User-Agent — some providers (kimi) reject the reqwest
+/// default. Proper = identifies the client, per their docs.
+const USER_AGENT: &str = concat!("eggplant-code/", env!("CARGO_PKG_VERSION"));
+
 pub struct OpenAi {
     config: ProviderConfig,
     client: reqwest::Client,
@@ -23,7 +27,18 @@ impl OpenAi {
 
     fn body(&self, request: &ChatRequest) -> Value {
         let mut messages = vec![json!({ "role": "system", "content": request.system })];
-        messages.extend(request.messages.iter().map(wire_message));
+        messages.extend(
+            request
+                .messages
+                .iter()
+                // An empty assistant turn (no text, no tool calls) is
+                // invalid on strict providers — drop it from the wire
+                // (older session files may still carry one).
+                .filter(|m| {
+                    !(m.role == Role::Assistant && m.text.is_empty() && m.tool_calls.is_empty())
+                })
+                .map(wire_message),
+        );
         json!({
             "model": self.config.model,
             "stream": true,
@@ -44,7 +59,13 @@ fn wire_message(message: &Message) -> Value {
     match message.role {
         Role::User => json!({ "role": "user", "content": message.text }),
         Role::Assistant => {
-            let mut wire = json!({ "role": "assistant", "content": message.text });
+            // Empty content must be null (not "") when tool calls carry
+            // the turn — kimi rejects an empty string here.
+            let mut wire = if message.text.is_empty() {
+                json!({ "role": "assistant", "content": null })
+            } else {
+                json!({ "role": "assistant", "content": message.text })
+            };
             if !message.tool_calls.is_empty() {
                 wire["tool_calls"] = message
                     .tool_calls
@@ -80,6 +101,7 @@ impl Provider for OpenAi {
             .client
             .post(format!("{}/chat/completions", self.config.base_url))
             .bearer_auth(&self.config.api_key)
+            .header(reqwest::header::USER_AGENT, USER_AGENT)
             .json(&self.body(request))
             .send();
 
@@ -147,5 +169,60 @@ impl Provider for OpenAi {
                 }
             }
         })
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn provider() -> OpenAi {
+        OpenAi::new(ProviderConfig {
+            name: "test".to_string(),
+            model: "m".to_string(),
+            api_key: "k".to_string(),
+            base_url: "http://localhost".to_string(),
+        })
+    }
+
+    fn request(messages: Vec<Message>) -> ChatRequest {
+        ChatRequest {
+            system: "sys".to_string(),
+            messages,
+            tools: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn empty_assistant_turns_are_dropped_from_the_wire() {
+        let body = provider().body(&request(vec![
+            Message::user("hi"),
+            Message {
+                role: Role::Assistant,
+                ..Message::default()
+            },
+            Message::user("again"),
+        ]));
+        let messages = body["messages"].as_array().unwrap();
+        // system + user + user: the empty assistant message is gone.
+        assert_eq!(messages.len(), 3);
+        assert!(messages.iter().all(|m| m["role"] != "assistant"));
+    }
+
+    #[test]
+    fn tool_call_turn_serializes_null_content_not_empty_string() {
+        let mut assistant = Message {
+            role: Role::Assistant,
+            ..Message::default()
+        };
+        assistant.tool_calls.push(ToolCall {
+            id: "c1".to_string(),
+            name: "read_file".to_string(),
+            args: serde_json::json!({"path": "a.rs"}),
+        });
+        let body = provider().body(&request(vec![Message::user("hi"), assistant]));
+        let wire = &body["messages"][2];
+        assert_eq!(wire["role"], "assistant");
+        assert!(wire["content"].is_null());
+        assert_eq!(wire["tool_calls"][0]["function"]["name"], "read_file");
     }
 }

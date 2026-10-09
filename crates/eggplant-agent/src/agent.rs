@@ -209,12 +209,17 @@ impl AgentRuntime {
             }
             (text, calls, failed)
         };
-        self.record(Message {
-            role: Role::Assistant,
-            text,
-            tool_calls: calls.clone(),
-            ..Message::default()
-        });
+        // Never persist an empty assistant message — strict providers
+        // (kimi) reject `role: assistant` with empty content on the
+        // next request, and an empty turn carries no information.
+        if !(text.is_empty() && calls.is_empty()) {
+            self.record(Message {
+                role: Role::Assistant,
+                text,
+                tool_calls: calls.clone(),
+                ..Message::default()
+            });
+        }
         if failed {
             return None;
         }
