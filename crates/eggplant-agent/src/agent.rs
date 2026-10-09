@@ -21,6 +21,35 @@ use crate::types::{ChatEvent, ChatRequest, Message, Role, ToolCall};
 /// Safety cap on turns per run (pi-style guard against runaway loops).
 const MAX_TURNS: usize = 25;
 
+/// How one provider stream ended.
+enum End {
+    /// The model finished the turn (stop or tool-use boundary).
+    Finished,
+    /// The user aborted mid-stream.
+    Aborted,
+    /// Transport/provider failure (error already emitted).
+    Failed,
+}
+
+/// The outcome of one streamed turn.
+enum Turn {
+    /// The model asked for tools — execute and stream again.
+    Calls(Vec<ToolCall>),
+    /// Text-only reply: the run is done.
+    Done,
+    /// Aborted mid-stream; the (partial) calls need closing.
+    Aborted(Vec<ToolCall>),
+    /// Failure already reported to the UI.
+    Failed,
+}
+
+/// How a run ended (drives `RunFinished`).
+#[derive(PartialEq, Eq)]
+enum RunOutcome {
+    Finished,
+    Aborted,
+}
+
 pub struct AgentRuntime {
     provider: Box<dyn Provider>,
     tools: Vec<Box<dyn Tool>>,
@@ -79,7 +108,13 @@ impl AgentRuntime {
         }
         while let Some(command) = commands.recv().await {
             match command {
-                AgentCommand::Prompt(text) => self.run_prompt(text, &mut commands).await,
+                AgentCommand::Prompt(text) => {
+                    self.run_prompt(text, &mut commands).await;
+                    // Prompts typed mid-run queue up; each gets its own run.
+                    while let Some(next) = self.queued.pop_front() {
+                        self.run_prompt(next, &mut commands).await;
+                    }
+                }
                 AgentCommand::Abort => {} // idle: nothing to abort
                 AgentCommand::NewChat => {
                     self.messages.clear();
@@ -97,6 +132,8 @@ impl AgentRuntime {
         let _ = self.events.send(event);
     }
 
+    /// Run one prompt: the tool-use loop until the model answers with
+    /// text, the user aborts, or the turn budget ends.
     async fn run_prompt(
         &mut self,
         text: String,
@@ -104,52 +141,62 @@ impl AgentRuntime {
     ) {
         self.emit(AgentEvent::RunStarted).await;
         self.record(Message::user(text));
-        let mut aborted = false;
-        for _turn in 0..MAX_TURNS {
-            let Some(calls) = self.stream_turn(commands, &mut aborted).await else {
-                break; // error event already emitted; run ends
-            };
-            if aborted {
-                self.close_pending_calls(calls, "aborted by user").await;
-                break;
-            }
-            if calls.is_empty() {
-                break; // clean finish
-            }
-            for call in calls {
-                let summary = summarize_call(&call);
-                self.emit(AgentEvent::ToolStarted {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    summary,
-                })
-                .await;
-                let output = match self.tools.iter().find(|t| t.name() == call.name) {
-                    Some(tool) => tool.execute(call.args.clone(), &self.host).await,
-                    None => crate::tool::ToolOutput::error(format!("unknown tool '{}'", call.name)),
-                };
-                self.emit(AgentEvent::ToolFinished {
-                    id: call.id.clone(),
-                    name: call.name.clone(),
-                    is_error: output.is_error,
-                })
-                .await;
-                self.messages.push(Message::tool_result(
-                    call.id,
-                    output.content,
-                    output.is_error,
-                ));
-            }
-        }
-        self.emit(if aborted {
-            AgentEvent::RunFinished { aborted: true }
-        } else {
-            AgentEvent::RunFinished { aborted: false }
+        let outcome = self.run_turns(commands).await;
+        self.emit(AgentEvent::RunFinished {
+            aborted: outcome == RunOutcome::Aborted,
         })
         .await;
-        // Drain queued prompts into the next runs.
-        while let Some(text) = self.queued.pop_front() {
-            Box::pin(self.run_prompt(text, commands)).await;
+    }
+
+    /// The tool-use loop: stream a turn → execute its calls → stream
+    /// again with the results, until the model stops calling tools.
+    async fn run_turns(
+        &mut self,
+        commands: &mut mpsc::UnboundedReceiver<AgentCommand>,
+    ) -> RunOutcome {
+        for _ in 0..MAX_TURNS {
+            match self.stream_turn(commands).await {
+                Turn::Calls(calls) => self.execute_calls(calls).await,
+                // Done: clean finish. Failed: error already emitted.
+                Turn::Done | Turn::Failed => return RunOutcome::Finished,
+                Turn::Aborted(calls) => {
+                    self.close_pending_calls(calls, "aborted by user").await;
+                    return RunOutcome::Aborted;
+                }
+            }
+        }
+        self.emit(AgentEvent::Error(format!(
+            "turn budget exhausted ({MAX_TURNS} turns)"
+        )))
+        .await;
+        RunOutcome::Finished
+    }
+
+    /// Execute one turn's calls sequentially, recording each result.
+    async fn execute_calls(&mut self, calls: Vec<ToolCall>) {
+        for call in calls {
+            let summary = summarize_call(&call);
+            self.emit(AgentEvent::ToolStarted {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                summary,
+            })
+            .await;
+            let output = match self.tools.iter().find(|t| t.name() == call.name) {
+                Some(tool) => tool.execute(call.args.clone(), &self.host).await,
+                None => crate::tool::ToolOutput::error(format!("unknown tool '{}'", call.name)),
+            };
+            self.emit(AgentEvent::ToolFinished {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                is_error: output.is_error,
+            })
+            .await;
+            self.record(Message::tool_result(
+                call.id,
+                output.content,
+                output.is_error,
+            ));
         }
     }
 
@@ -172,11 +219,7 @@ impl AgentRuntime {
     /// One provider stream. Returns the tool calls requested, or `None`
     /// on error/abort (both already reported). Handles mid-run commands:
     /// Abort cancels the stream; Prompt queues for after the run.
-    async fn stream_turn(
-        &mut self,
-        commands: &mut mpsc::UnboundedReceiver<AgentCommand>,
-        aborted: &mut bool,
-    ) -> Option<Vec<ToolCall>> {
+    async fn stream_turn(&mut self, commands: &mut mpsc::UnboundedReceiver<AgentCommand>) -> Turn {
         let request = ChatRequest {
             system: self.system_prompt.clone(),
             messages: self.messages.clone(),
@@ -184,52 +227,62 @@ impl AgentRuntime {
         };
         // The stream borrows `self.provider` for its whole scope — keep
         // that scope in a block so recording (a &mut self) can follow.
-        let (text, calls, failed) = {
+        let (text, calls, end) = {
             let stream = self.provider.stream(&request);
             futures::pin_mut!(stream);
             let mut text = String::new();
             let mut calls = Vec::new();
-            let mut failed = false;
-            loop {
-                let event = tokio::select! {
-                    event = stream.next() => event,
-                    command = commands.recv() => {
-                        match command {
-                            Some(AgentCommand::Abort) => {
-                                *aborted = true;
-                                self.emit(AgentEvent::Aborted).await;
-                            }
-                            Some(AgentCommand::Prompt(text)) => self.queued.push_back(text),
-                            // Mid-run NewChat: queued prompts die with the old
-                            // transcript; the clear happens when the run
-                            // settles (abort first for an immediate reset).
-                            Some(AgentCommand::NewChat) => self.queued.clear(),
-                            None => {}
+            // None = keep streaming; Some(end) = leave the loop with an
+            // outcome. Abort breaks immediately: dropping the stream
+            // cancels the HTTP request instead of draining it mutely.
+            let end = loop {
+                let end: Option<End> = tokio::select! {
+                    event = stream.next() => match event {
+                        Some(ChatEvent::TextDelta(delta)) => {
+                            text.push_str(&delta);
+                            self.emit(AgentEvent::TextDelta(delta)).await;
+                            None
                         }
-                        continue;
-                    }
+                        // Display-only: thinking is shown but never
+                        // persisted or replayed to the model.
+                        Some(ChatEvent::ThinkDelta(delta)) => {
+                            self.emit(AgentEvent::ThinkDelta(delta)).await;
+                            None
+                        }
+                        Some(ChatEvent::ToolCall(call)) => {
+                            calls.push(call);
+                            None
+                        }
+                        Some(ChatEvent::Done) | None => Some(End::Finished),
+                        Some(ChatEvent::Error(message)) => {
+                            self.emit(AgentEvent::Error(message)).await;
+                            Some(End::Failed)
+                        }
+                    },
+                    command = commands.recv() => match command {
+                        Some(AgentCommand::Abort) => {
+                            self.emit(AgentEvent::Aborted).await;
+                            Some(End::Aborted)
+                        }
+                        Some(AgentCommand::Prompt(text)) => {
+                            self.queued.push_back(text);
+                            None
+                        }
+                        // Mid-run NewChat: queued prompts die with the old
+                        // transcript; the clear happens when the run
+                        // settles (abort first for an immediate reset).
+                        Some(AgentCommand::NewChat) => {
+                            self.queued.clear();
+                            None
+                        }
+                        None => None,
+                    },
                 };
-                let Some(event) = event else { break };
-                match event {
-                    ChatEvent::TextDelta(delta) => {
-                        text.push_str(&delta);
-                        self.emit(AgentEvent::TextDelta(delta)).await;
-                    }
-                    // Display-only: thinking is shown but not persisted —
-                    // it must never be replayed to the model.
-                    ChatEvent::ThinkDelta(delta) => {
-                        self.emit(AgentEvent::ThinkDelta(delta)).await;
-                    }
-                    ChatEvent::ToolCall(call) => calls.push(call),
-                    ChatEvent::Done => break,
-                    ChatEvent::Error(message) => {
-                        self.emit(AgentEvent::Error(message)).await;
-                        failed = true;
-                        break;
-                    }
+                if let Some(end) = end {
+                    break end;
                 }
-            }
-            (text, calls, failed)
+            };
+            (text, calls, end)
         };
         // Never persist an empty assistant message — strict providers
         // (kimi) reject `role: assistant` with empty content on the
@@ -242,10 +295,12 @@ impl AgentRuntime {
                 ..Message::default()
             });
         }
-        if failed {
-            return None;
+        match end {
+            End::Finished if calls.is_empty() => Turn::Done,
+            End::Finished => Turn::Calls(calls),
+            End::Aborted => Turn::Aborted(calls),
+            End::Failed => Turn::Failed,
         }
-        Some(calls)
     }
 }
 
