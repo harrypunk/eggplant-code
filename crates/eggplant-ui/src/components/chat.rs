@@ -37,12 +37,8 @@ fn transcript_lines(items: &[ChatItem], sheet: &Stylesheet) -> Vec<Line<'static>
                 )));
             }
             ChatItem::Assistant(text) => {
-                for line in text.lines() {
-                    lines.push(Line::from(Span::styled(
-                        line.to_owned(),
-                        sheet.style(StyleClass::Text),
-                    )));
-                }
+                // Assistant replies are markdown — render it styled.
+                lines.extend(crate::components::markdown::markdown_lines(text, sheet));
             }
             ChatItem::Thinking(text) => {
                 let style = sheet

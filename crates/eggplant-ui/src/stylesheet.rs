@@ -36,6 +36,8 @@ pub enum StyleClass {
     Title,
     /// Inverted bold chip (leap labels).
     Chip,
+    /// Inline code / code blocks: text on the raised surface.
+    Code,
 
     // ---- surfaces ----
     /// Body text on a raised surface (panels, floats, dialogs).
@@ -100,6 +102,7 @@ impl<'a> Stylesheet<'a> {
                 .add_modifier(Modifier::BOLD),
 
             StyleClass::Surface => Style::default().fg(theme.fg).bg(theme.surface),
+            StyleClass::Code => Style::default().fg(theme.fg).bg(theme.surface),
             StyleClass::Bar => Style::default().fg(theme.fg).bg(theme.statusline),
             StyleClass::MutedOnBar => Style::default().fg(theme.comment).bg(theme.statusline),
 

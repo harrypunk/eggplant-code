@@ -17,6 +17,7 @@ eggplant-agent = { path = "crates/eggplant-agent" }
 
 # External deps
 ratatui = "0.30.2"
+pulldown-cmark = "0.13"
 crossterm = "0.29"
 # helix doesn't publish library crates (crates.io has only a 0.0.0 stub), so
 # git deps are required — pinned to a rev on the LAN mirror for reproducibility.
