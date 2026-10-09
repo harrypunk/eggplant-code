@@ -39,6 +39,8 @@ pub enum ExplorerAction {
     CollapseOrParent,
     ToggleAll,
     Open,
+    /// Re-list expanded directories (`r`); the slow tick also does this.
+    Refresh,
     Unfocus,
 }
 
@@ -50,6 +52,7 @@ impl ExplorerAction {
             "expand" => Self::ExpandOrDescend,
             "collapse" => Self::CollapseOrParent,
             "toggle-all" => Self::ToggleAll,
+            "refresh" => Self::Refresh,
             "open" => Self::Open,
             "unfocus" => Self::Unfocus,
             _ => return None,
@@ -84,6 +87,7 @@ pub const DEFAULT_KEYS: &[(KeyStroke, ExplorerAction)] = &[
         ExplorerAction::CollapseOrParent,
     ),
     (KeyStroke::char('I'), ExplorerAction::ToggleAll),
+    (KeyStroke::char('r'), ExplorerAction::Refresh),
     (
         KeyStroke::new(KeyCode::Enter, KeyModifiers::NONE),
         ExplorerAction::Open,
@@ -132,6 +136,27 @@ impl FilesPanel {
         }
         self.selected = self.selected.saturating_add_signed(delta).min(len - 1);
         self.ensure_selection_visible();
+    }
+
+    /// Re-list expanded directories, preserving the selection by path
+    /// (indices shift when entries come and go).
+    fn refresh(&mut self, app: &App) {
+        let selected_path = self.selected_row(app).map(|row| row.path);
+        match self.tree.refresh() {
+            Ok(true) => {
+                let rows = self.rows(app);
+                self.selected = selected_path
+                    .and_then(|path| rows.iter().position(|row| row.path == path))
+                    .unwrap_or_else(|| self.selected.min(rows.len().saturating_sub(1)));
+                self.ensure_selection_visible();
+            }
+            Ok(false) => {}
+            Err(err) => {
+                // A vanished root is the realistic case; stay quiet per
+                // tick, the listing just freezes.
+                let _ = err;
+            }
+        }
     }
 
     /// Scroll the window so the selected row stays visible.
@@ -308,6 +333,10 @@ impl Layer for FilesPanel {
                     },
                 })
             }
+            ExplorerAction::Refresh => {
+                self.refresh(app);
+                Handled::quiet()
+            }
             ExplorerAction::Open => self.open_selected(app),
             ExplorerAction::Unfocus => Handled::one(AppAction::Unfocus),
         }
@@ -317,6 +346,12 @@ impl Layer for FilesPanel {
         if event == ActionEvent::BufferChanged {
             self.reveal_current_buffer(app);
         }
+    }
+
+    fn tick(&mut self, app: &App) {
+        // The explorer projects disk truth: re-list on the slow tick so
+        // shell/git/agent file changes show up without a manual refresh.
+        self.refresh(app);
     }
 
     fn resize(&mut self, area: Rect, _app: &App) {

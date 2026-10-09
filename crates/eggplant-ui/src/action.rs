@@ -148,6 +148,14 @@ pub enum AppAction {
         provider: String,
         model: String,
     },
+    /// Reload the current buffer from disk (discards local edits —
+    /// the command confirms first when dirty).
+    ReloadBuffer,
+    /// Reload all buffers from disk (`force` discards local edits —
+    /// confirmed upstream).
+    ReloadAllBuffers {
+        force: bool,
+    },
     /// Abort the current run.
     AgentAbort,
     /// One runtime event (streamed delta, tool lifecycle, run end).
@@ -520,6 +528,52 @@ impl Compositor {
                                 "{provider}: could not save model"
                             )));
                     }
+                }
+            }
+            AppAction::ReloadBuffer => match app.editor.reload_current() {
+                Ok(()) => {
+                    let name = app.editor.display_name().unwrap_or_default();
+                    app.notifications
+                        .push(crate::layers::notification::Notification::with_level(
+                            crate::layers::notification::Level::Info,
+                            format!("reloaded {name}"),
+                        ));
+                    self.broadcast(crate::action::ActionEvent::BufferChanged, app);
+                }
+                Err(e) => {
+                    app.notifications
+                        .push(crate::layers::notification::Notification::error(format!(
+                            "reload: {e}"
+                        )));
+                }
+            },
+            AppAction::ReloadAllBuffers { force } => {
+                let outcome = app.editor.reload_all(force);
+                let names: Vec<String> = outcome
+                    .skipped
+                    .iter()
+                    .map(|p| {
+                        p.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                let message = if names.is_empty() {
+                    format!("reloaded {} buffer(s)", outcome.reloaded.len())
+                } else {
+                    format!(
+                        "reloaded {} buffer(s), skipped dirty: {}",
+                        outcome.reloaded.len(),
+                        names.join(", ")
+                    )
+                };
+                app.notifications
+                    .push(crate::layers::notification::Notification::with_level(
+                        crate::layers::notification::Level::Info,
+                        message,
+                    ));
+                if !outcome.reloaded.is_empty() {
+                    self.broadcast(crate::action::ActionEvent::BufferChanged, app);
                 }
             }
             AppAction::AgentAbort => {

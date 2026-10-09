@@ -5,7 +5,11 @@
 
 use std::io;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+/// How often we stat open buffers for external changes. A handful of
+/// stats per second is free; a filesystem watcher is not worth it.
+const EXTERNAL_POLL: Duration = Duration::from_secs(1);
 
 use crossterm::event::{self, Event};
 use ratatui::layout::Rect;
@@ -30,6 +34,7 @@ fn event_loop(
     compositor: &mut Compositor,
 ) -> io::Result<()> {
     let mut probe = crate::theme::probe::TerminalProbe::new();
+    let mut last_external_poll = Instant::now();
     while !app.is_quitting() {
         render_frame(terminal, compositor, app)?;
 
@@ -41,12 +46,54 @@ fn event_loop(
         }
         drain_agent(app, compositor);
         drain_background(app, compositor);
+        // The file watcher: stat open buffers once a second — clean
+        // buffers reload, dirty ones get a conflict notice.
+        if last_external_poll.elapsed() >= EXTERNAL_POLL {
+            last_external_poll = Instant::now();
+            poll_external(app, compositor);
+            compositor.tick(app);
+        }
 
         if let Some(event) = next_event()? {
             handle_event(event, app, compositor, &mut probe);
         }
     }
     Ok(())
+}
+
+/// Poll buffers for external edits (shell, git, another editor — agent
+/// edits already come through the facade). Clean reloads broadcast a
+/// change; conflicts (dirty buffer + disk change) warn once each.
+fn poll_external(app: &mut App, compositor: &mut Compositor) {
+    let changes = app.editor.poll_external_changes();
+    if changes.is_empty() {
+        return;
+    }
+    let short = |p: &PathBuf| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    for path in &changes.reloaded {
+        app.notifications
+            .push(crate::layers::notification::Notification::with_level(
+                crate::layers::notification::Level::Info,
+                format!("{} reloaded (changed on disk)", short(path)),
+            ));
+    }
+    for path in &changes.conflicts {
+        app.notifications
+            .push(crate::layers::notification::Notification::with_level(
+                crate::layers::notification::Level::Warn,
+                format!(
+                    "{} changed on disk; buffer modified — Space b r to reload",
+                    short(path)
+                ),
+            ));
+    }
+    if !changes.reloaded.is_empty() {
+        compositor.broadcast(crate::action::ActionEvent::BufferChanged, app);
+    }
 }
 
 /// Background threads (auth validation, …) post data-only events; each

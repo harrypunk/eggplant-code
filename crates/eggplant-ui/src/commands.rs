@@ -185,7 +185,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
             KeyNode::Leaf {
                 key: 'q',
                 description: "save+quit",
-                command: "file.save-quit",
+                command: "file.savequit",
             },
             KeyNode::Leaf {
                 key: 'e',
@@ -195,7 +195,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
             KeyNode::Leaf {
                 key: 'p',
                 description: "open",
-                command: "file.open-picker",
+                command: "file.openpicker",
             },
         ],
     },
@@ -249,6 +249,11 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
                 description: "close",
                 command: "buffer.close",
             },
+            KeyNode::Leaf {
+                key: 'r',
+                description: "reload",
+                command: "buffer.reload",
+            },
             // Quick-choose by index; out-of-range is ignored.
             KeyNode::DigitLeaves {
                 description: "buffer n",
@@ -292,7 +297,7 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
         children: &[KeyNode::Leaf {
             key: 'w',
             description: "wrap",
-            command: "ui.toggle-wrap",
+            command: "ui.togglewrap",
         }],
     },
     KeyNode::Leaf {
@@ -317,7 +322,7 @@ pub fn default_registry() -> Registry {
     let commands = vec![
         Command::app("app.quit", "Quit (confirms on unsaved changes)", quit),
         Command::app(
-            "app.force-quit",
+            "app.forcequit",
             "Quit immediately without saving",
             force_quit,
         ),
@@ -326,7 +331,7 @@ pub fn default_registry() -> Registry {
             "Save the current buffer",
             save_with_notification,
         ),
-        Command::app("file.open-picker", "Open a file (picker)", |app| {
+        Command::app("file.openpicker", "Open a file (picker)", |app| {
             vec![AppAction::PushLayer(Box::new(file_picker::file_picker(
                 app,
             )))]
@@ -336,17 +341,33 @@ pub fn default_registry() -> Registry {
             "Toggle file explorer",
             toggle_files_panel,
         ),
-        Command::app("window.focus-left", "Focus window to the left", focus_left),
-        Command::app("ui.toggle-wrap", "Toggle soft-wrap", |_| {
+        Command::app("window.focusleft", "Focus window to the left", focus_left),
+        Command::app("ui.togglewrap", "Toggle soft-wrap", |_| {
             vec![AppAction::ToggleWrap]
         }),
         Command::app(
-            "window.focus-right",
+            "window.focusright",
             "Focus window to the right",
             focus_right,
         ),
         Command::app("buffer.next", "Switch to next buffer", |_| {
             vec![AppAction::NextBuffer]
+        }),
+        Command::app(
+            "buffer.reload",
+            "Reload buffer from disk (confirms on unsaved changes)",
+            reload_buffer,
+        ),
+        Command::app("buffer.reloadall", "Reload all buffers from disk", |app| {
+            if app.editor.any_modified() {
+                vec![AppAction::PushLayer(Box::new(ConfirmDialog::new(
+                    "reload all",
+                    "Some buffers have unsaved changes that will be discarded. Reload all anyway?",
+                    vec![AppAction::ReloadAllBuffers { force: true }],
+                )))]
+            } else {
+                vec![AppAction::ReloadAllBuffers { force: false }]
+            }
         }),
         Command::app("buffer.prev", "Switch to previous buffer", |_| {
             vec![AppAction::PrevBuffer]
@@ -357,7 +378,7 @@ pub fn default_registry() -> Registry {
             |_| vec![AppAction::CloseCurrentBuffer],
         ),
         Command::app(
-            "file.save-quit",
+            "file.savequit",
             "Save the current buffer, then quit",
             |_| vec![AppAction::SaveQuit],
         ),
@@ -392,7 +413,7 @@ pub fn default_registry() -> Registry {
             ))]
         }),
         Command::app(
-            "which-key.open",
+            "whichkey.open",
             "Open the key-hints menu (Space prefix)",
             |_| vec![AppAction::PushLayer(Box::new(WhichKey::root()))],
         ),
@@ -450,16 +471,16 @@ pub fn default_registry() -> Registry {
         .chain(EditorAction::ALL.iter().map(|a| Command::edit(*a)))
         .collect();
     let keymap = vec![
-        (KeyStroke::ctrl('c'), "app.force-quit"),
+        (KeyStroke::ctrl('c'), "app.forcequit"),
         (KeyStroke::ctrl('q'), "app.quit"),
         (KeyStroke::ctrl('s'), "file.save"),
         (KeyStroke::ctrl('e'), "panel.files.toggle"),
-        (KeyStroke::ctrl('h'), "window.focus-left"),
-        (KeyStroke::ctrl('l'), "window.focus-right"),
+        (KeyStroke::ctrl('h'), "window.focusleft"),
+        (KeyStroke::ctrl('l'), "window.focusright"),
         (KeyStroke::ctrl_shift('p'), "palette.open"),
         (KeyStroke::ctrl_shift('P'), "palette.open"), // terminal casing varies
         (KeyStroke::ctrl('p'), "palette.open"),       // fallback: no kitty protocol
-        (KeyStroke::char(' '), "which-key.open"),     // prefix menu
+        (KeyStroke::char(' '), "whichkey.open"),      // prefix menu
         (KeyStroke::ctrl('i'), "agent.chat"),
         // Dedicated interrupt key (Esc stays close/unfocus; C-c stays
         // force-quit globally). Works with no chat view open.
@@ -482,6 +503,25 @@ pub fn default_registry() -> Registry {
 /// Save the current buffer; dispatch reports the outcome.
 pub(crate) fn save_with_notification(_: &App) -> Vec<AppAction> {
     vec![AppAction::Save]
+}
+
+/// Reload the current buffer from disk, confirming first when dirty.
+fn reload_buffer(app: &App) -> Vec<AppAction> {
+    if app.editor.current_path().is_none() {
+        return vec![AppAction::Notify {
+            level: crate::layers::notification::Level::Warn,
+            message: "buffer has no file".to_string(),
+        }];
+    }
+    if app.editor.is_modified() {
+        vec![AppAction::PushLayer(Box::new(ConfirmDialog::new(
+            "unsaved changes",
+            "Discard local changes and reload from disk?",
+            vec![AppAction::ReloadBuffer],
+        )))]
+    } else {
+        vec![AppAction::ReloadBuffer]
+    }
 }
 
 /// Quit, confirming first when any buffer has unsaved changes.

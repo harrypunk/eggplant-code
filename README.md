@@ -28,6 +28,7 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `C-f` / `C-u` | page down / up (cursor and scroll follow) |
 | `]b` / `[b` | next / previous buffer |
 | `Space b 0-9` | jump straight to buffer n (out-of-range ignored) |
+| `Space b r` | reload buffer from disk (confirms when dirty); buffers auto-reload on external change; explorer re-lists on the same 1s tick (`r` = manual) |
 | `Space a i` / `C-i` | agent chat popup |
 | `Space a a` | provider auth (keys in `~/.eggplant/agent/auth.toml`) |
 | `Space a n` | new agent session |

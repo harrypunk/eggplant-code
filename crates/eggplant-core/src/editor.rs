@@ -99,6 +99,13 @@ struct Buffer {
     /// own editor assigns unique ids; ours doesn't), so we track our own.
     slot: usize,
     doc: Document,
+    /// Disk mtime at open/last save — the external-change baseline.
+    saved_mtime: Option<std::time::SystemTime>,
+}
+
+/// The file's mtime (None for scratch buffers / unreadable metadata).
+fn mtime_of(path: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
 /// Live buffer-search state (`Space s b`, vim `/`-style): all matches as
@@ -153,7 +160,12 @@ fn relative_display(path: &std::path::Path) -> String {
 
 impl Buffer {
     fn new(doc: Document, slot: usize) -> Self {
-        Self { slot, doc }
+        let saved_mtime = doc.path().and_then(mtime_of);
+        Self {
+            slot,
+            doc,
+            saved_mtime,
+        }
     }
 
     fn display_name(&self) -> String {
@@ -162,6 +174,30 @@ impl Buffer {
             .map(relative_display)
             .unwrap_or_else(|| "untitled".to_owned())
     }
+}
+
+/// The result of `poll_external_changes`.
+#[derive(Debug, Default)]
+pub struct ExternalChanges {
+    /// Clean buffers reloaded from disk.
+    pub reloaded: Vec<PathBuf>,
+    /// Buffers dirty AND changed on disk (untouched; user must decide).
+    pub conflicts: Vec<PathBuf>,
+}
+
+impl ExternalChanges {
+    pub fn is_empty(&self) -> bool {
+        self.reloaded.is_empty() && self.conflicts.is_empty()
+    }
+}
+
+/// The result of `reload_all`.
+#[derive(Debug, Default)]
+pub struct ReloadOutcome {
+    /// Buffers reloaded from disk.
+    pub reloaded: Vec<PathBuf>,
+    /// Dirty buffers skipped (or unreadable), left untouched.
+    pub skipped: Vec<PathBuf>,
 }
 
 /// Read-only buffer summary for UIs (topbar, pickers).
@@ -1333,9 +1369,101 @@ impl Editor {
             .runtime
             .block_on(future)
             .context("save failed")?;
-        let doc = self.doc_mut().expect("current buffer");
-        doc.set_last_saved_revision(event.revision, event.save_time);
+        let i = self.current.expect("current buffer");
+        let buffer = &mut self.buffers[i];
+        buffer
+            .doc
+            .set_last_saved_revision(event.revision, event.save_time);
+        if let Some(path) = buffer.doc.path() {
+            buffer.saved_mtime = mtime_of(path);
+        }
         Ok(())
+    }
+
+    /// Detect files changed on disk since open/last save. Clean buffers
+    /// reload silently (undo history resets — vim semantics); dirty
+    /// buffers are reported as conflicts once and left untouched.
+    pub fn poll_external_changes(&mut self) -> ExternalChanges {
+        let mut changes = ExternalChanges::default();
+        let mut reloaded_current = false;
+        for i in 0..self.buffers.len() {
+            let buffer = &mut self.buffers[i];
+            let Some(path) = buffer.doc.path().map(Path::to_path_buf) else {
+                continue;
+            };
+            let Some(disk_mtime) = mtime_of(&path) else {
+                continue; // deleted/unreadable: leave the buffer alone
+            };
+            if buffer.saved_mtime == Some(disk_mtime) {
+                continue;
+            }
+            if buffer.doc.is_modified() {
+                // Report once per external change, then track the new
+                // baseline (a further change re-fires).
+                changes.conflicts.push(path);
+                buffer.saved_mtime = Some(disk_mtime);
+            } else if let Ok(doc) = self.backend.open_document(&path) {
+                buffer.doc = doc;
+                buffer.saved_mtime = Some(disk_mtime);
+                changes.reloaded.push(path);
+                reloaded_current |= self.current == Some(i);
+            }
+        }
+        // A fresh document has no selection entry for our view — the
+        // lazy init in restore_cursor runs on buffer switch; a reload of
+        // the CURRENT buffer must re-run it now (cursor back to top).
+        if reloaded_current {
+            self.restore_cursor();
+        }
+        changes
+    }
+
+    /// Force-reload the current buffer from disk, discarding local edits
+    /// (the conflict escape hatch; palette `buffer.reload`).
+    pub fn reload_current(&mut self) -> Result<()> {
+        let i = self.current.context("no buffer to reload")?;
+        let path = self.buffers[i]
+            .doc
+            .path()
+            .context("buffer has no file")?
+            .to_path_buf();
+        let doc = self.backend.open_document(&path)?;
+        self.buffers[i].doc = doc;
+        self.buffers[i].saved_mtime = mtime_of(&path);
+        self.restore_cursor();
+        Ok(())
+    }
+
+    /// Reload every buffer from disk. `force: false` reloads clean
+    /// buffers and skips dirty ones (non-destructive default);
+    /// `force: true` discards local edits everywhere (the UI confirms
+    /// first). Undo histories reset on reload.
+    pub fn reload_all(&mut self, force: bool) -> ReloadOutcome {
+        let mut outcome = ReloadOutcome::default();
+        let mut reloaded_current = false;
+        for i in 0..self.buffers.len() {
+            let buffer = &mut self.buffers[i];
+            let Some(path) = buffer.doc.path().map(Path::to_path_buf) else {
+                continue;
+            };
+            if buffer.doc.is_modified() && !force {
+                outcome.skipped.push(path);
+                continue;
+            }
+            match self.backend.open_document(&path) {
+                Ok(doc) => {
+                    buffer.doc = doc;
+                    buffer.saved_mtime = mtime_of(&path);
+                    outcome.reloaded.push(path);
+                    reloaded_current |= self.current == Some(i);
+                }
+                Err(_) => outcome.skipped.push(path),
+            }
+        }
+        if reloaded_current {
+            self.restore_cursor();
+        }
+        outcome
     }
 
     // ---- introspection for status line ----
@@ -1379,6 +1507,43 @@ impl highlight::SnippetHighlighter for Editor {
 mod tests {
     use super::*;
     use crate::highlight::{SnippetHighlighter, SyntaxScope};
+
+    #[test]
+    fn poll_external_reloads_clean_and_flags_conflicts() {
+        let dir = std::env::temp_dir().join(format!("egg-poll-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.txt");
+        std::fs::write(&path, "v1\n").unwrap();
+        let mut editor = Editor::open(&path).unwrap();
+        assert!(editor.poll_external_changes().is_empty());
+
+        // External write with a bumped mtime (granularity-safe).
+        let bump = |p: &Path| {
+            std::fs::write(p, "v2\n").unwrap();
+            let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+            std::fs::File::open(p).unwrap().set_modified(later).unwrap();
+        };
+        bump(&path);
+        let changes = editor.poll_external_changes();
+        assert_eq!(changes.reloaded, vec![path.clone()]);
+        assert!(editor.text().contains("v2"), "buffer reloaded from disk");
+
+        // Dirty buffer + disk change → conflict, reported once.
+        bump(&path);
+        editor.insert_str("local");
+        let changes = editor.poll_external_changes();
+        assert_eq!(changes.conflicts, vec![path.clone()]);
+        assert!(editor.text().contains("local"), "dirty buffer untouched");
+        assert!(
+            editor.poll_external_changes().is_empty(),
+            "a conflict is reported once"
+        );
+
+        // The escape hatch reloads anyway (discards local edits).
+        editor.reload_current().unwrap();
+        assert!(!editor.text().contains("local"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn snippet_highlight_scopes_rust_keywords() {

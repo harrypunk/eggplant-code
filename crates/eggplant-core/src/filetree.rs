@@ -118,6 +118,37 @@ impl FileTree {
         rows
     }
 
+    /// Re-list every expanded directory (external changes: shell, git,
+    /// the agent's own tools). Vanished directories un-expand and drop
+    /// from the cache (descendants too). Returns whether any listing
+    /// changed — callers skip selection fixups when nothing moved.
+    pub fn refresh(&mut self) -> io::Result<bool> {
+        let mut changed = false;
+        let dirs: Vec<PathBuf> = self.expanded.iter().cloned().collect();
+        for dir in dirs {
+            match (self.lister)(&dir) {
+                Ok(entries) => {
+                    if self.cache.get(&dir) != Some(&entries) {
+                        self.cache.insert(dir, entries);
+                        changed = true;
+                    }
+                }
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    // The directory (and everything under it) is gone.
+                    if dir != self.root {
+                        self.expanded.retain(|d| !d.starts_with(&dir));
+                        self.expanded.insert(self.root.clone());
+                    }
+                    let before = self.cache.len();
+                    self.cache.retain(|d, _| !d.starts_with(&dir));
+                    changed |= self.cache.len() != before;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(changed)
+    }
+
     /// Expand every ancestor directory of `path` so it becomes visible
     /// (buffer-sync reveal). Idempotent. Returns `Ok(false)` when `path`
     /// isn't under the root (nothing to reveal), `Err` on listing I/O.
@@ -172,6 +203,38 @@ impl FileTree {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refresh_picks_up_external_changes_and_prunes_vanished_dirs() {
+        let root = std::env::temp_dir().join(format!("eggplant-refresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::write(root.join("a/old.txt"), "x").unwrap();
+
+        let ignores = crate::files::IgnoreRules::new(&root, &[]);
+        let mut tree = FileTree::new(root.clone(), fs_lister).unwrap();
+        tree.expand_to(&root.join("a/old.txt")).unwrap();
+
+        // External create → refresh reports + lists it.
+        std::fs::write(root.join("a/new.txt"), "x").unwrap();
+        assert!(tree.refresh().unwrap());
+        let names: Vec<String> = tree
+            .rows(&ignores, false)
+            .iter()
+            .map(|r| r.name.clone())
+            .collect();
+        assert_eq!(names, vec!["a", "new.txt", "old.txt"]);
+        // Nothing moved → no change reported.
+        assert!(!tree.refresh().unwrap());
+
+        // External delete of an expanded dir → pruned, root survives.
+        std::fs::remove_dir_all(root.join("a")).unwrap();
+        assert!(tree.refresh().unwrap());
+        assert!(tree.rows(&ignores, false).is_empty());
+        assert!(tree.refresh().is_ok(), "vanished dir is pruned, not sticky");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn expand_to_reveals_nested_file_and_ignores_outsiders() {
         let root = std::env::temp_dir().join(format!("eggplant-expand-{}", std::process::id()));

@@ -65,6 +65,12 @@ pub trait Layer {
     /// current buffer on `BufferChanged`). Default: ignore.
     fn observe(&mut self, _event: ActionEvent, _app: &App) {}
 
+    /// Slow-tick lifecycle hook (~1/s, from the event loop). For state
+    /// that tracks external truth — the explorer re-lists directories
+    /// here. Default: nothing. (Fast per-frame work does not belong
+    /// here; views derive from state every frame anyway.)
+    fn tick(&mut self, _app: &App) {}
+
     /// How this layer participates in layout.
     fn kind(&self) -> LayerKind;
 
@@ -310,6 +316,14 @@ impl Compositor {
 
     /// Pre-render lifecycle: give every layer its resolved area so it can
     /// update viewport-dependent state outside of `render` (Rule 5).
+    /// The slow tick: forward to every layer (panels sync external
+    /// state; floats/containers default to no-op).
+    pub fn tick(&mut self, app: &App) {
+        for layer in &mut self.layers {
+            layer.tick(app);
+        }
+    }
+
     pub fn resize(&mut self, area: Rect, app: &App) {
         let kinds: Vec<LayerKind> = self.layers.iter().map(|layer| layer.kind()).collect();
         let solution = compute_layout(&kinds, area);
