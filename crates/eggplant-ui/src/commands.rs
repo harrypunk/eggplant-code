@@ -214,6 +214,11 @@ pub static WHICH_KEY_ROOT: &[KeyNode] = &[
                 command: "agent.auth",
             },
             KeyNode::Leaf {
+                key: 'm',
+                description: "choose model",
+                command: "agent.model",
+            },
+            KeyNode::Leaf {
                 key: 't',
                 description: "toggle chat window",
                 command: "agent.toggle",
@@ -408,6 +413,12 @@ pub fn default_registry() -> Registry {
         }),
         Command::app("agent.auth", "Authenticate providers", |_app| {
             vec![AppAction::PushLayer(crate::layers::auth::AuthLayer::new())]
+        }),
+        Command::app("agent.model", "Choose a model", |_app| {
+            vec![
+                AppAction::PushLayer(crate::layers::models::ModelPicker::new()),
+                AppAction::FetchModels,
+            ]
         }),
         Command::app("agent.toggle", "Toggle the agent chat window", |_app| {
             vec![

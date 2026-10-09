@@ -3,6 +3,7 @@
 //! `eggplant-agent` (headless); this module is where its messages meet
 //! the editor (docs/design/agent.md).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use eggplant_agent::{AgentEvent, AgentSession, HostCall, HostReply, ProviderConfig};
@@ -80,7 +81,9 @@ impl AgentSettings {
             .and_then(|store| store.url_for(&name).map(str::to_owned));
         let base_url = self.base_url.clone().or(stored_url).unwrap_or(base_url);
         let api_key_env = self.api_key_env.clone().unwrap_or(api_key_env);
-        let model = self.model.clone().unwrap_or(default_model);
+        let stored_model = eggplant_agent::AuthStore::load_default()
+            .and_then(|store| store.model_for(&name).map(str::to_owned));
+        let model = self.model.clone().or(stored_model).unwrap_or(default_model);
         let api_key = std::env::var(&api_key_env)
             .ok()
             .filter(|k| !k.is_empty())
@@ -116,6 +119,14 @@ pub enum ChatItem {
 }
 
 /// The agent slice of `App` (like `theme`, `input`).
+/// A provider's model list (fetched on a background thread).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelListState {
+    Loading,
+    Ready(Vec<String>),
+    Error(String),
+}
+
 pub struct AgentState {
     pub settings: AgentSettings,
     session: Option<AgentSession>,
@@ -124,6 +135,10 @@ pub struct AgentState {
     /// Bumped when auth state changes (a key was saved) — the auth view
     /// re-reads auth.toml only on a bump, not per action.
     pub auth_generation: u64,
+    /// Provider → its model list (filled by FetchModels / login).
+    pub model_lists: BTreeMap<String, ModelListState>,
+    /// Provider → the saved default model (auth.toml [models]).
+    pub default_models: BTreeMap<String, String>,
 }
 
 impl AgentState {
@@ -134,6 +149,10 @@ impl AgentState {
             transcript: Vec::new(),
             running: false,
             auth_generation: 0,
+            model_lists: BTreeMap::new(),
+            default_models: eggplant_agent::AuthStore::load_default()
+                .map(|store| store.default_models())
+                .unwrap_or_default(),
         }
     }
 
@@ -148,6 +167,12 @@ impl AgentState {
 
     pub fn session(&self) -> Option<&AgentSession> {
         self.session.as_ref()
+    }
+
+    /// Drop the live session — the next prompt respawns with fresh
+    /// config (a model switch) while the store keeps the history.
+    pub fn drop_session(&mut self) {
+        self.session = None;
     }
 
     /// Apply one runtime event to the transcript (dispatch-side).
@@ -208,6 +233,18 @@ fn pick_provider(configured: &[&str]) -> Result<String, String> {
             many.join(", ")
         )),
     }
+}
+
+/// The default model after login: the preset default when the account
+/// actually has it (the 404 guard), else the first available model.
+pub(crate) fn choose_default_model(preset_default: &str, models: &[String]) -> Option<String> {
+    if models.is_empty() {
+        return None;
+    }
+    if models.iter().any(|m| m == preset_default) {
+        return Some(preset_default.to_string());
+    }
+    models.first().cloned()
 }
 
 /// Project the persisted model-facing transcript back into UI items.
@@ -364,6 +401,20 @@ fn err(e: impl std::fmt::Display) -> String {
 mod tests {
     use super::*;
     use eggplant_agent::{Message, ToolCall};
+
+    #[test]
+    fn default_model_prefers_preset_else_first_available() {
+        let models = vec!["a".to_string(), "preset-model".to_string()];
+        assert_eq!(
+            choose_default_model("preset-model", &models),
+            Some("preset-model".to_string())
+        );
+        assert_eq!(
+            choose_default_model("missing", &models),
+            Some("a".to_string())
+        );
+        assert_eq!(choose_default_model("any", &[]), None);
+    }
 
     #[test]
     fn pick_provider_infers_from_credentials() {

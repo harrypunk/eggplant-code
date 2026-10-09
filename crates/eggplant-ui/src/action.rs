@@ -30,6 +30,13 @@ pub enum BgEvent {
         key: String,
         base_url: String,
         outcome: Result<(), String>,
+        /// Models the key can see (empty when the listing failed).
+        models: Vec<String>,
+    },
+    /// A provider's model list was fetched (model picker).
+    ModelsListed {
+        provider: String,
+        result: Result<Vec<String>, String>,
     },
 }
 
@@ -125,7 +132,21 @@ pub enum AppAction {
         provider: String,
         key: String,
         base_url: String,
+        /// Models the key can see (empty when the listing failed).
+        models: Vec<String>,
         outcome: Result<(), String>,
+    },
+    /// Fetch model lists for all authenticated providers (model picker).
+    FetchModels,
+    /// A provider's model list arrived (from a background thread).
+    ModelsListed {
+        provider: String,
+        result: Result<Vec<String>, String>,
+    },
+    /// Set + persist the default model for a provider.
+    SetModel {
+        provider: String,
+        model: String,
     },
     /// Abort the current run.
     AgentAbort,
@@ -329,11 +350,19 @@ impl Compositor {
                 let tx = app.bg_sender();
                 std::thread::spawn(move || {
                     let outcome = eggplant_agent::validate_key(&base_url, &key);
+                    // On success, discover the models immediately — login
+                    // picks a default so the user never hits a stale one.
+                    let models = if outcome.is_ok() {
+                        eggplant_agent::list_models(&base_url, &key).unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
                     let _ = tx.send(BgEvent::AuthValidated {
                         provider,
                         key,
                         base_url,
                         outcome,
+                        models,
                     });
                 });
             }
@@ -341,6 +370,7 @@ impl Compositor {
                 provider,
                 key,
                 base_url,
+                models,
                 outcome,
             } => match outcome {
                 Ok(()) => {
@@ -349,15 +379,41 @@ impl Compositor {
                     let override_url = eggplant_agent::preset(&provider)
                         .filter(|p| p.base_url != base_url)
                         .map(|_| base_url.as_str());
-                    let saved = eggplant_agent::AuthStore::load_default()
-                        .map(|mut store| store.set(&provider, &key, override_url));
+                    // Login picks a working default model so the user
+                    // never has to choose before the first chat.
+                    let default_model = eggplant_agent::preset(&provider)
+                        .and_then(|p| crate::agent::choose_default_model(p.default_model, &models))
+                        .or_else(|| models.first().cloned());
+                    let saved = eggplant_agent::AuthStore::load_default().map(|mut store| {
+                        let saved = store.set(&provider, &key, override_url);
+                        if saved.is_ok()
+                            && let Some(model) = &default_model
+                        {
+                            let _ = store.set_model(&provider, model);
+                        }
+                        saved
+                    });
                     match saved {
                         Some(Ok(())) => {
                             app.agent.auth_generation += 1;
+                            if let Some(model) = &default_model {
+                                app.agent
+                                    .default_models
+                                    .insert(provider.clone(), model.clone());
+                            }
+                            app.agent.model_lists.insert(
+                                provider.clone(),
+                                crate::agent::ModelListState::Ready(models),
+                            );
                             app.notifications.push(
                                 crate::layers::notification::Notification::with_level(
                                     crate::layers::notification::Level::Info,
-                                    format!("{provider}: connected ✓ (key saved to auth.toml)"),
+                                    match &default_model {
+                                        Some(model) => {
+                                            format!("{provider}: connected ✓ (model: {model})")
+                                        }
+                                        None => format!("{provider}: connected ✓"),
+                                    },
                                 ),
                             );
                         }
@@ -396,6 +452,77 @@ impl Compositor {
                     Err(message) => app
                         .notifications
                         .push(crate::layers::notification::Notification::error(message)),
+                }
+            }
+            AppAction::FetchModels => {
+                // One background thread per authenticated provider whose
+                // list we don't already have.
+                let store = eggplant_agent::AuthStore::load_default();
+                for preset in eggplant_agent::provider::PRESETS {
+                    let key = std::env::var(preset.api_key_env)
+                        .ok()
+                        .filter(|k| !k.is_empty())
+                        .or_else(|| {
+                            store
+                                .as_ref()
+                                .and_then(|s| s.get(preset.name).map(str::to_owned))
+                        });
+                    let Some(key) = key else { continue };
+                    if matches!(
+                        app.agent.model_lists.get(preset.name),
+                        Some(crate::agent::ModelListState::Ready(_))
+                            | Some(crate::agent::ModelListState::Loading)
+                    ) {
+                        continue;
+                    }
+                    app.agent.model_lists.insert(
+                        preset.name.to_string(),
+                        crate::agent::ModelListState::Loading,
+                    );
+                    let base_url = store
+                        .as_ref()
+                        .and_then(|s| s.url_for(preset.name).map(str::to_owned))
+                        .unwrap_or_else(|| preset.base_url.to_string());
+                    let provider = preset.name.to_string();
+                    let tx = app.bg_sender();
+                    std::thread::spawn(move || {
+                        let result = eggplant_agent::list_models(&base_url, &key);
+                        let _ = tx.send(BgEvent::ModelsListed { provider, result });
+                    });
+                }
+            }
+            AppAction::ModelsListed { provider, result } => {
+                let state = match result {
+                    Ok(models) => crate::agent::ModelListState::Ready(models),
+                    Err(e) => crate::agent::ModelListState::Error(e),
+                };
+                app.agent.model_lists.insert(provider, state);
+            }
+            AppAction::SetModel { provider, model } => {
+                let saved = eggplant_agent::AuthStore::load_default()
+                    .map(|mut store| store.set_model(&provider, &model));
+                match saved {
+                    Some(Ok(())) => {
+                        app.agent
+                            .default_models
+                            .insert(provider.clone(), model.clone());
+                        // The running session pinned the old model at
+                        // spawn — drop it; the next prompt respawns with
+                        // the new model, history preserved via the store.
+                        app.agent.drop_session();
+                        app.notifications.push(
+                            crate::layers::notification::Notification::with_level(
+                                crate::layers::notification::Level::Info,
+                                format!("{provider}: model → {model}"),
+                            ),
+                        );
+                    }
+                    _ => {
+                        app.notifications
+                            .push(crate::layers::notification::Notification::error(format!(
+                                "{provider}: could not save model"
+                            )));
+                    }
                 }
             }
             AppAction::AgentAbort => {

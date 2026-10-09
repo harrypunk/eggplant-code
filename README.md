@@ -31,6 +31,7 @@ cargo run -- .              # open a directory: file explorer + welcome screen
 | `Space a i` / `C-i` | agent chat popup |
 | `Space a a` | provider auth (keys in `~/.eggplant/agent/auth.toml`) |
 | `Space a n` | new agent session |
+| `Space a m` | model picker (models fetched per provider) |
 | `Space a t` | toggle agent chat window |
 | `C-F8` | abort the running agent |
 | `Space u w` | toggle soft-wrap (off = horizontal scroll) |

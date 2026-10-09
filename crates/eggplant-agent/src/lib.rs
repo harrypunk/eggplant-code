@@ -15,7 +15,7 @@ pub mod tool;
 pub mod tools;
 pub mod types;
 
-pub use auth::{AuthStore, KeySource, mask, validate_key};
+pub use auth::{AuthStore, KeySource, list_models, mask, validate_key};
 pub use host::{HostCall, HostClient, HostReply, HostRequest, TextEdit};
 pub use provider::{Provider, ProviderConfig, preset, preset_names, provider_for};
 pub use session::{AgentCommand, AgentEvent, AgentSession, SessionMsg};

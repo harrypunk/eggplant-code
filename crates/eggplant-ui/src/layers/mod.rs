@@ -6,6 +6,7 @@ pub mod file_picker;
 pub mod files_panel;
 pub mod grep;
 pub mod leap;
+pub mod models;
 pub mod notification;
 pub mod palette;
 pub mod picker;

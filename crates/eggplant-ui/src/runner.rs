@@ -59,16 +59,21 @@ fn drain_background(app: &mut App, compositor: &mut Compositor) {
                 key,
                 base_url,
                 outcome,
+                models,
             } => compositor.dispatch(
                 AppAction::AuthResult {
                     provider,
                     key,
                     base_url,
+                    models,
                     outcome,
                 },
                 None,
                 app,
             ),
+            crate::action::BgEvent::ModelsListed { provider, result } => {
+                compositor.dispatch(AppAction::ModelsListed { provider, result }, None, app)
+            }
         }
     }
 }
