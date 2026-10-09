@@ -386,10 +386,11 @@ impl Compositor {
                         .or_else(|| models.first().cloned());
                     let saved = eggplant_agent::AuthStore::load_default().map(|mut store| {
                         let saved = store.set(&provider, &key, override_url);
+                        // The latest login becomes THE selected pair.
                         if saved.is_ok()
                             && let Some(model) = &default_model
                         {
-                            let _ = store.set_model(&provider, model);
+                            let _ = store.set_current(&provider, model);
                         }
                         saved
                     });
@@ -397,9 +398,7 @@ impl Compositor {
                         Some(Ok(())) => {
                             app.agent.auth_generation += 1;
                             if let Some(model) = &default_model {
-                                app.agent
-                                    .default_models
-                                    .insert(provider.clone(), model.clone());
+                                app.agent.current = Some((provider.clone(), model.clone()));
                             }
                             app.agent.model_lists.insert(
                                 provider.clone(),
@@ -500,12 +499,10 @@ impl Compositor {
             }
             AppAction::SetModel { provider, model } => {
                 let saved = eggplant_agent::AuthStore::load_default()
-                    .map(|mut store| store.set_model(&provider, &model));
+                    .map(|mut store| store.set_current(&provider, &model));
                 match saved {
                     Some(Ok(())) => {
-                        app.agent
-                            .default_models
-                            .insert(provider.clone(), model.clone());
+                        app.agent.current = Some((provider.clone(), model.clone()));
                         // The running session pinned the old model at
                         // spawn — drop it; the next prompt respawns with
                         // the new model, history preserved via the store.

@@ -29,9 +29,13 @@ impl AgentSettings {
         // No explicit provider? Infer it from whoever has credentials
         // (env var or auth.toml) — authenticating via Space a a IS the
         // choice. Ambiguous or absent credentials get a pointed error.
-        let name = match self.provider.clone() {
-            Some(name) => name,
-            None => {
+        let current = eggplant_agent::AuthStore::load_default()
+            .and_then(|store| store.current().map(|(p, m)| (p.to_string(), m.to_string())));
+        let name = match (self.provider.clone(), &current) {
+            (Some(name), _) => name,
+            // The picker's selection IS the provider choice.
+            (None, Some((provider, _))) => provider.clone(),
+            (None, None) => {
                 let store = eggplant_agent::AuthStore::load_default();
                 let configured: Vec<&str> = eggplant_agent::provider::PRESETS
                     .iter()
@@ -81,9 +85,15 @@ impl AgentSettings {
             .and_then(|store| store.url_for(&name).map(str::to_owned));
         let base_url = self.base_url.clone().or(stored_url).unwrap_or(base_url);
         let api_key_env = self.api_key_env.clone().unwrap_or(api_key_env);
-        let stored_model = eggplant_agent::AuthStore::load_default()
-            .and_then(|store| store.model_for(&name).map(str::to_owned));
-        let model = self.model.clone().or(stored_model).unwrap_or(default_model);
+        // Model priority: [agent] model > [current] (same provider) > preset.
+        let current_model = current
+            .filter(|(provider, _)| provider == &name)
+            .map(|(_, model)| model);
+        let model = self
+            .model
+            .clone()
+            .or(current_model)
+            .unwrap_or(default_model);
         let api_key = std::env::var(&api_key_env)
             .ok()
             .filter(|k| !k.is_empty())
@@ -137,8 +147,9 @@ pub struct AgentState {
     pub auth_generation: u64,
     /// Provider → its model list (filled by FetchModels / login).
     pub model_lists: BTreeMap<String, ModelListState>,
-    /// Provider → the saved default model (auth.toml [models]).
-    pub default_models: BTreeMap<String, String>,
+    /// THE selected provider+model (auth.toml [current]) — exactly one,
+    /// however many providers are authenticated.
+    pub current: Option<(String, String)>,
 }
 
 impl AgentState {
@@ -150,9 +161,8 @@ impl AgentState {
             running: false,
             auth_generation: 0,
             model_lists: BTreeMap::new(),
-            default_models: eggplant_agent::AuthStore::load_default()
-                .map(|store| store.default_models())
-                .unwrap_or_default(),
+            current: eggplant_agent::AuthStore::load_default()
+                .and_then(|store| store.current().map(|(p, m)| (p.to_string(), m.to_string()))),
         }
     }
 

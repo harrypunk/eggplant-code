@@ -17,17 +17,24 @@ struct AuthFile {
     /// Endpoint overrides (absent = the preset's default base_url).
     #[serde(default)]
     urls: BTreeMap<String, String>,
-    /// The chosen default model per provider (`Space a m`, or the model
-    /// discovered at login).
+    /// THE selected provider+model (exactly one — login sets it,
+    /// `Space a m` changes it).
     #[serde(default)]
-    models: BTreeMap<String, String>,
+    current: Option<CurrentEntry>,
+}
+
+/// The active pair persisted under `[current]`.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct CurrentEntry {
+    pub provider: String,
+    pub model: String,
 }
 
 pub struct AuthStore {
     path: PathBuf,
     keys: BTreeMap<String, String>,
     urls: BTreeMap<String, String>,
-    models: BTreeMap<String, String>,
+    current: Option<CurrentEntry>,
 }
 
 /// Where a working key came from (displayed in the auth view).
@@ -52,7 +59,7 @@ impl AuthStore {
             path,
             keys: file.keys,
             urls: file.urls,
-            models: file.models,
+            current: file.current,
         }
     }
 
@@ -69,14 +76,11 @@ impl AuthStore {
         self.urls.get(provider).map(String::as_str)
     }
 
-    /// The chosen default model, if any.
-    pub fn model_for(&self, provider: &str) -> Option<&str> {
-        self.models.get(provider).map(String::as_str)
-    }
-
-    /// A snapshot of all stored default models (provider → model).
-    pub fn default_models(&self) -> BTreeMap<String, String> {
-        self.models.clone()
+    /// The selected provider+model, if any.
+    pub fn current(&self) -> Option<(&str, &str)> {
+        self.current
+            .as_ref()
+            .map(|c| (c.provider.as_str(), c.model.as_str()))
     }
 
     /// Set + persist (one call; the file is the truth). `url` is stored
@@ -89,9 +93,12 @@ impl AuthStore {
         self.save()
     }
 
-    /// Set the default model + persist.
-    pub fn set_model(&mut self, provider: &str, model: &str) -> io::Result<()> {
-        self.models.insert(provider.to_string(), model.to_string());
+    /// Set the selected provider+model + persist.
+    pub fn set_current(&mut self, provider: &str, model: &str) -> io::Result<()> {
+        self.current = Some(CurrentEntry {
+            provider: provider.to_string(),
+            model: model.to_string(),
+        });
         self.save()
     }
 
@@ -102,7 +109,7 @@ impl AuthStore {
         let text = toml::to_string_pretty(&AuthFile {
             keys: self.keys.clone(),
             urls: self.urls.clone(),
-            models: self.models.clone(),
+            current: self.current.clone(),
         })
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         std::fs::write(&self.path, text)
@@ -198,11 +205,11 @@ mod tests {
         store
             .set("qwen", "sk-test123", Some("https://proxy.example/v1"))
             .unwrap();
-        store.set_model("qwen", "qwen3-coder-plus").unwrap();
+        store.set_current("qwen", "qwen3-coder-plus").unwrap();
         let reloaded = AuthStore::load(path);
         assert_eq!(reloaded.get("qwen"), Some("sk-test123"));
         assert_eq!(reloaded.url_for("qwen"), Some("https://proxy.example/v1"));
-        assert_eq!(reloaded.model_for("qwen"), Some("qwen3-coder-plus"));
+        assert_eq!(reloaded.current(), Some(("qwen", "qwen3-coder-plus")));
         assert!(reloaded.get("kimi").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }

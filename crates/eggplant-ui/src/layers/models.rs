@@ -20,7 +20,7 @@ struct Row {
     provider: Option<String>,
     label: String,
     /// This model is the provider's saved default.
-    is_default: bool,
+    is_current: bool,
 }
 
 pub struct ModelPicker {
@@ -39,26 +39,27 @@ impl ModelPicker {
             rows.push(Row {
                 provider: None,
                 label: provider.clone(),
-                is_default: false,
+                is_current: false,
             });
             match list {
                 ModelListState::Loading => rows.push(Row {
                     provider: Some(provider.clone()),
                     label: "  loading…".to_string(),
-                    is_default: false,
+                    is_current: false,
                 }),
                 ModelListState::Error(e) => rows.push(Row {
                     provider: Some(provider.clone()),
                     label: format!("  ⚠ {e}"),
-                    is_default: false,
+                    is_current: false,
                 }),
                 ModelListState::Ready(models) => {
-                    let default = app.agent.default_models.get(provider);
+                    // Exactly one current pair across all providers.
+                    let current = app.agent.current.as_ref();
                     for model in models {
                         rows.push(Row {
                             provider: Some(provider.clone()),
                             label: format!("  {model}"),
-                            is_default: default == Some(model),
+                            is_current: current == Some(&(provider.clone(), model.clone())),
                         });
                     }
                 }
@@ -114,14 +115,14 @@ impl Layer for ModelPicker {
                 let selected = i == self.selected;
                 let marker = if selected {
                     "▸"
-                } else if row.is_default {
+                } else if row.is_current {
                     "✓"
                 } else {
                     " "
                 };
                 let style = if selected {
                     sheet.emphasized(StyleClass::Selected)
-                } else if row.is_default {
+                } else if row.is_current {
                     sheet.style(StyleClass::Info)
                 } else if row.label.starts_with("  ⚠") || row.label.starts_with("  loading") {
                     sheet.style(StyleClass::Muted)
