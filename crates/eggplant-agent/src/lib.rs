@@ -14,7 +14,7 @@ pub mod tools;
 pub mod types;
 
 pub use host::{HostCall, HostClient, HostReply, HostRequest, TextEdit};
-pub use provider::{Provider, ProviderConfig, ProviderKind, provider_for};
+pub use provider::{Provider, ProviderConfig, preset, preset_names, provider_for};
 pub use session::{AgentCommand, AgentEvent, AgentSession, SessionMsg};
 pub use tool::Tool;
 pub use types::{ChatEvent, ChatRequest, Message, Role, ToolCall, ToolDecl};

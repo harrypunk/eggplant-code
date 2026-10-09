@@ -59,9 +59,9 @@ What we skip (pi features we don't need in v1):
 
 ```
 eggplant-agent (headless, owns tokio runtime)
-  provider/   one adapter per API flavor (v1: Anthropic Messages,
-              OpenAI-compatible completions), normalizes to a
-              ChatEvent stream (text_delta, tool_call, done, error)
+  provider/   ONE adapter (OpenAI-compatible completions — pi's finding:
+              every platform is just baseUrl + env-var key over that wire
+              format) + a preset table (qwen, kimi, openai, custom)
   loop.rs     the agent loop: turn = stream reply → execute tool calls
               sequentially → feed results → repeat until no tool calls
   tool.rs     Tool trait: name + params schema + prompt contribution +
@@ -166,29 +166,33 @@ window); `C-i` is a global shortcut for the popup. Inside a chat view:
 `Enter` send, `Esc` close (modal) / unfocus (window), scroll keys on
 the transcript, `C-c` abort the current run.
 
-### Provider adapters
+### Provider presets
 
-V1 ships two adapters behind a `Provider` trait returning a normalized
-`ChatEvent` stream (pi's `AssistantMessageEvent`, reduced):
+Pi's provider layer taught the key lesson: every cloud platform we care
+about speaks **OpenAI-compatible chat completions** — providers differ
+only in `base_url`, the API-key env var, and model names. So there is
+exactly ONE adapter (SSE streaming → normalized `ChatEvent`: text_delta
+/ tool_call / done / error) and a **preset table**:
 
-```
-text_delta(String) | tool_call { id, name, args } | done { usage } | error(message)
-```
-
-- **Anthropic Messages** (SSE): first-class tool_use blocks, thinking
-  skipped in v1.
-- **OpenAI-compatible chat completions** (SSE): covers OpenAI, local
-  servers (llama.cpp, Ollama, LM Studio), OpenRouter, DeepSeek, etc.
+| preset | base_url | key env | default model |
+|--------|----------|---------|---------------|
+| `qwen`   | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen3-coder-plus` |
+| `kimi`   | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | `kimi-k2-0905-preview` |
+| `openai` | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-4o` |
+| `custom` | required in config | required in config | required in config |
 
 Config (`config.toml`):
 
 ```toml
 [agent]
-provider = "anthropic"        # or "openai-compatible"
-model = "claude-sonnet-4-5"
-api_key_env = "ANTHROPIC_API_KEY"
-base_url = "https://api.anthropic.com"   # override for compatible endpoints
+provider = "qwen"           # or kimi / openai / custom
+# model = "qwen3-coder-plus"      # optional; preset default
+# api_key_env = "DASHSCOPE_API_KEY"  # optional; preset default
+# base_url = "..."                # optional override (local servers, proxies)
 ```
+
+Adding a platform = one row in the table, no code. Anthropic's native
+Messages API was dropped rather than maintained as a second wire format.
 
 Deps for eggplant-agent: `tokio`, `reqwest` (stream), `serde_json`,
 `schemars` (tool param schemas from Rust types, one source of truth).

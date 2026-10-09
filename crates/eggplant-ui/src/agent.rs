@@ -5,8 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use eggplant_agent::{AgentEvent, AgentSession, HostCall, HostReply};
-use eggplant_agent::{ProviderConfig, ProviderKind};
+use eggplant_agent::{AgentEvent, AgentSession, HostCall, HostReply, ProviderConfig};
 use eggplant_core::grep;
 
 use crate::app::App;
@@ -23,37 +22,54 @@ pub struct AgentSettings {
 
 impl AgentSettings {
     /// Resolve into a provider config; `Err` is user-facing guidance.
+    /// Every preset speaks OpenAI-compatible completions (one adapter);
+    /// `custom` = any compatible endpoint with explicit base_url.
     pub fn resolve(&self) -> Result<ProviderConfig, String> {
-        let provider = self.provider.clone().unwrap_or_else(|| "anthropic".into());
-        let kind = match provider.as_str() {
-            "anthropic" => ProviderKind::Anthropic,
-            "openai" | "openai-compatible" => ProviderKind::OpenAiCompatible,
-            other => return Err(format!("unknown agent provider '{other}'")),
-        };
-        let api_key_env = self.api_key_env.clone().unwrap_or_else(|| {
-            match kind {
-                ProviderKind::Anthropic => "ANTHROPIC_API_KEY",
-                ProviderKind::OpenAiCompatible => "OPENAI_API_KEY",
+        let name = self.provider.clone().ok_or_else(|| {
+            format!(
+                "agent: set [agent] provider ({}, or \"custom\")",
+                eggplant_agent::preset_names()
+            )
+        })?;
+        let (base_url, api_key_env, default_model) = match eggplant_agent::preset(&name) {
+            Some(p) => (
+                p.base_url.to_string(),
+                p.api_key_env.to_string(),
+                p.default_model.to_string(),
+            ),
+            None if name == "custom" => {
+                let base_url = self
+                    .base_url
+                    .clone()
+                    .ok_or("agent: provider \"custom\" needs [agent] base_url")?;
+                let api_key_env = self
+                    .api_key_env
+                    .clone()
+                    .ok_or("agent: provider \"custom\" needs [agent] api_key_env")?;
+                let model = self
+                    .model
+                    .clone()
+                    .ok_or("agent: provider \"custom\" needs [agent] model")?;
+                (base_url, api_key_env, model)
             }
-            .to_string()
-        });
+            None => {
+                return Err(format!(
+                    "agent: unknown provider '{name}' ({}, or \"custom\")",
+                    eggplant_agent::preset_names()
+                ));
+            }
+        };
+        // Field-level overrides win over preset conventions.
+        let base_url = self.base_url.clone().unwrap_or(base_url);
+        let api_key_env = self.api_key_env.clone().unwrap_or(api_key_env);
+        let model = self.model.clone().unwrap_or(default_model);
         let api_key = std::env::var(&api_key_env)
             .map_err(|_| format!("agent: set ${api_key_env} (or [agent] api_key_env)"))?;
-        let model = self.model.clone().unwrap_or_else(|| {
-            match kind {
-                ProviderKind::Anthropic => "claude-sonnet-4-5",
-                ProviderKind::OpenAiCompatible => "gpt-4o",
-            }
-            .to_string()
-        });
         Ok(ProviderConfig {
-            base_url: self
-                .base_url
-                .clone()
-                .unwrap_or_else(|| ProviderConfig::default_base_url(&kind).to_string()),
-            kind,
+            name,
             model,
             api_key,
+            base_url,
         })
     }
 }

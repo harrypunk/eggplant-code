@@ -3,8 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Conversation role. Tool results are their own role (mapped per provider:
-/// Anthropic `user` with a `tool_result` block, OpenAI `role: "tool"`).
+/// Conversation role. Tool results are their own role (mapped by the
+/// adapter to the wire format — OpenAI: `role: "tool"`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {
     #[default]

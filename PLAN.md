@@ -138,8 +138,8 @@ A custom, AI-native terminal editor with an opinionated UI layout.
 - [ ] **M9 — LSP**: diagnostics/goto/completion via helix-lsp (reused, behind the facade).
       Ready seams: `g d` is one arm in the resolver; picker infra covers references/symbols.
 - [ ] **M10 — AI v1** (resumes; unhold M4): headless agent session in
-      `eggplant-agent` (event-stream loop, Anthropic + OpenAI-compatible
-      adapters), tools operating **through the editor facade** (read via
+      `eggplant-agent` (event-stream loop, one OpenAI-compatible adapter +
+      preset table: qwen / kimi / openai / custom), tools operating **through the editor facade** (read via
       `Peek`, edit via transactions — edits land live in the buffer and are
       undoable), one session two presentations (popup `Space a i`/`C-i`,
       right-side window `Space a t`). Design: `docs/design/agent.md`.
