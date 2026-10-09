@@ -27,6 +27,8 @@ pub enum AgentEvent {
     RunStarted,
     /// A streamed text fragment of the assistant's reply.
     TextDelta(String),
+    /// A streamed reasoning fragment (display-only, not persisted).
+    ThinkDelta(String),
     ToolStarted {
         id: String,
         name: String,

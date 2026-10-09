@@ -215,6 +215,11 @@ impl AgentRuntime {
                         text.push_str(&delta);
                         self.emit(AgentEvent::TextDelta(delta)).await;
                     }
+                    // Display-only: thinking is shown but not persisted —
+                    // it must never be replayed to the model.
+                    ChatEvent::ThinkDelta(delta) => {
+                        self.emit(AgentEvent::ThinkDelta(delta)).await;
+                    }
                     ChatEvent::ToolCall(call) => calls.push(call),
                     ChatEvent::Done => break,
                     ChatEvent::Error(message) => {

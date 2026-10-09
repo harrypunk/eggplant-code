@@ -224,6 +224,13 @@ impl Provider for OpenAi {
                     continue;
                 };
                 let delta = &value["choices"][0]["delta"];
+                // Reasoning first: kimi/qwen stream `reasoning_content`
+                // before the answer (a thinking model emits both).
+                if let Some(think) = delta["reasoning_content"].as_str()
+                    && !think.is_empty()
+                {
+                    yield ChatEvent::ThinkDelta(think.to_owned());
+                }
                 if let Some(text) = delta["content"].as_str()
                     && !text.is_empty()
                 {

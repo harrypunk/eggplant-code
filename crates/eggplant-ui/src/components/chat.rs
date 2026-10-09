@@ -44,6 +44,15 @@ fn transcript_lines(items: &[ChatItem], sheet: &Stylesheet) -> Vec<Line<'static>
                     )));
                 }
             }
+            ChatItem::Thinking(text) => {
+                let style = sheet
+                    .style(StyleClass::Muted)
+                    .add_modifier(ratatui::style::Modifier::ITALIC);
+                lines.push(Line::from(Span::styled("✱ thinking", style)));
+                for line in text.lines() {
+                    lines.push(Line::from(Span::styled(line.to_owned(), style)));
+                }
+            }
             ChatItem::Tool {
                 summary, is_error, ..
             } => {

@@ -80,6 +80,9 @@ pub struct ChatRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ChatEvent {
     TextDelta(String),
+    /// Reasoning/thinking fragment (kimi `reasoning_content`, qwen
+    /// `enable_thinking`) — display-only, never replayed to the model.
+    ThinkDelta(String),
     ToolCall(ToolCall),
     /// The assistant turn ended cleanly (stop or tool-use boundary).
     Done,

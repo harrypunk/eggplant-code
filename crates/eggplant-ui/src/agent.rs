@@ -120,6 +120,8 @@ pub enum ChatItem {
     User(String),
     /// Streamed assistant text (deltas append while streaming).
     Assistant(String),
+    /// Reasoning stream (display-only; never persisted or replayed).
+    Thinking(String),
     /// `is_error`: None = running, Some(false) = ok, Some(true) = failed.
     Tool {
         id: String,
@@ -195,6 +197,14 @@ impl AgentState {
                 match self.transcript.last_mut() {
                     Some(ChatItem::Assistant(text)) => text.push_str(delta),
                     _ => self.transcript.push(ChatItem::Assistant(delta.clone())),
+                }
+            }
+            AgentEvent::ThinkDelta(delta) => {
+                // Same append-to-tail pattern as assistant text: a new
+                // thinking block starts after any non-thinking item.
+                match self.transcript.last_mut() {
+                    Some(ChatItem::Thinking(text)) => text.push_str(delta),
+                    _ => self.transcript.push(ChatItem::Thinking(delta.clone())),
                 }
             }
             AgentEvent::ToolStarted { id, summary, .. } => {
@@ -424,6 +434,28 @@ mod tests {
             Some("a".to_string())
         );
         assert_eq!(choose_default_model("any", &[]), None);
+    }
+
+    #[test]
+    fn thinking_appends_to_tail_block_only() {
+        let mut agent = AgentState::new(AgentSettings::default());
+        agent.apply(&AgentEvent::ThinkDelta("let me ".into()));
+        agent.apply(&AgentEvent::ThinkDelta("think".into()));
+        agent.apply(&AgentEvent::TextDelta("answer".into()));
+        agent.apply(&AgentEvent::ThinkDelta("more".into()));
+        let kinds: Vec<String> = agent
+            .transcript
+            .iter()
+            .map(|item| match item {
+                ChatItem::Thinking(t) => format!("think:{t}"),
+                ChatItem::Assistant(t) => format!("text:{t}"),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec!["think:let me think", "text:answer", "think:more"]
+        );
     }
 
     #[test]
