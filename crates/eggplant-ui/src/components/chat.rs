@@ -18,6 +18,10 @@ pub struct ChatProps<'a> {
     pub running: bool,
     /// Lines scrolled up from the bottom (chat semantics: 0 = tail).
     pub scroll: usize,
+    /// Only the focused view places the terminal cursor — an unfocused
+    /// chat panel must not steal the editor's cursor (paint order is
+    /// z-order: panels paint after the base, so last cursor wins).
+    pub focused: bool,
 }
 
 /// The transcript projected to styled lines: `> user`, assistant text,
@@ -86,10 +90,22 @@ pub fn view(props: &ChatProps, area: Rect, sheet: &Stylesheet) -> Element {
                     style: Style::default(),
                     wrap: true,
                 },
-                Element::Input {
-                    prompt: Line::from(Span::styled("❯ ", sheet.style(StyleClass::Accent))),
-                    text: props.input.to_owned(),
-                    style: sheet.style(StyleClass::Text),
+                if props.focused {
+                    Element::Input {
+                        prompt: Line::from(Span::styled("❯ ", sheet.style(StyleClass::Accent))),
+                        text: props.input.to_owned(),
+                        style: sheet.style(StyleClass::Text),
+                    }
+                } else {
+                    // Same visuals, no cursor placement.
+                    Element::Text {
+                        lines: vec![Line::from(vec![
+                            Span::styled("❯ ", sheet.style(StyleClass::Accent)),
+                            Span::styled(props.input.to_owned(), sheet.style(StyleClass::Text)),
+                        ])],
+                        style: Style::default(),
+                        wrap: false,
+                    }
                 },
             ],
         }),
@@ -130,6 +146,7 @@ mod tests {
             input: "",
             running: false,
             scroll,
+            focused: true,
         }
     }
 
@@ -148,6 +165,34 @@ mod tests {
         assert!(out.contains("> fix the bug"), "{out}");
         assert!(out.contains("⚙ edit main.rs ✓"), "{out}");
         assert!(out.contains("done"), "{out}");
+    }
+
+    #[test]
+    fn unfocused_view_places_no_cursor() {
+        // Only the focused layer may place the terminal cursor — panels
+        // paint after the editor, so a cursor here would steal focus
+        // visually (the bug this regression-tests).
+        fn has_input(el: &Element) -> bool {
+            match el {
+                Element::Input { .. } | Element::Cursor(_) => true,
+                Element::Layout { children, .. } | Element::Stack(children) => {
+                    children.iter().any(has_input)
+                }
+                Element::Bordered { child, .. }
+                | Element::Cleared(child)
+                | Element::Fixed { child, .. } => has_input(child),
+                _ => false,
+            }
+        }
+        let theme = Theme::default();
+        let sheet = Stylesheet::new(&theme);
+        let mut props = props_of(&[], 0);
+        props.focused = false;
+        let tree = view(&props, Rect::new(0, 0, 40, 10), &sheet);
+        assert!(!has_input(&tree), "unfocused chat must not place a cursor");
+        props.focused = true;
+        let tree = view(&props, Rect::new(0, 0, 40, 10), &sheet);
+        assert!(has_input(&tree), "focused chat owns the cursor");
     }
 
     #[test]

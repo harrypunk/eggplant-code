@@ -38,19 +38,20 @@ enum EscBehavior {
 }
 
 impl ChatView {
-    fn props<'a>(&'a self, title: &'a str, app: &'a App) -> ChatProps<'a> {
+    fn props<'a>(&'a self, title: &'a str, app: &'a App, focused: bool) -> ChatProps<'a> {
         ChatProps {
             title,
             items: &app.agent.transcript,
             input: &self.input,
             running: app.agent.running,
             scroll: self.scroll,
+            focused,
         }
     }
 
-    fn view(&self, title: &str, area: Rect, app: &App) -> Element {
+    fn view(&self, title: &str, area: Rect, app: &App, focused: bool) -> Element {
         let sheet = Stylesheet::new(&app.theme.current);
-        chat::view(&self.props(title, app), area, &sheet)
+        chat::view(&self.props(title, app, focused), area, &sheet)
     }
 
     fn handle_key(&mut self, key: KeyEvent, esc: EscBehavior) -> Handled {
@@ -127,7 +128,7 @@ impl ChatModal {
 }
 
 impl Layer for ChatModal {
-    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
+    fn view(&self, area: Rect, app: &App, focused: bool) -> Element {
         // Centered 60%×60% float.
         use ratatui::layout::{Constraint, Layout};
         let [_, vertical, _] = Layout::vertical([
@@ -144,10 +145,12 @@ impl Layer for ChatModal {
         .areas(vertical);
         Element::fixed(
             horizontal,
-            Element::cleared(
-                self.chat
-                    .view("agent — Esc closes, C-F8 aborts", horizontal, app),
-            ),
+            Element::cleared(self.chat.view(
+                "agent — Esc closes, C-F8 aborts",
+                horizontal,
+                app,
+                focused,
+            )),
         )
     }
 
@@ -187,10 +190,10 @@ impl ChatPanel {
 }
 
 impl Layer for ChatPanel {
-    fn view(&self, area: Rect, app: &App, _focused: bool) -> Element {
+    fn view(&self, area: Rect, app: &App, focused: bool) -> Element {
         Element::cleared(
             self.chat
-                .view("agent — Esc unfocuses, C-F8 aborts", area, app),
+                .view("agent — Esc unfocuses, C-F8 aborts", area, app, focused),
         )
     }
 
