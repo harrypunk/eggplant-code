@@ -110,6 +110,7 @@ impl AgentRuntime {
                 break; // error event already emitted; run ends
             };
             if aborted {
+                self.close_pending_calls(calls, "aborted by user").await;
                 break;
             }
             if calls.is_empty() {
@@ -149,6 +150,22 @@ impl AgentRuntime {
         // Drain queued prompts into the next runs.
         while let Some(text) = self.queued.pop_front() {
             Box::pin(self.run_prompt(text, commands)).await;
+        }
+    }
+
+    /// An abort left these calls unanswered: close each with an error
+    /// result so the stored history stays valid — an assistant message
+    /// with tool_calls must be followed by their tool messages (strict
+    /// providers 400 otherwise).
+    async fn close_pending_calls(&mut self, calls: Vec<ToolCall>, reason: &str) {
+        for call in calls {
+            self.emit(AgentEvent::ToolFinished {
+                id: call.id.clone(),
+                name: call.name.clone(),
+                is_error: true,
+            })
+            .await;
+            self.record(Message::tool_result(call.id, reason.to_string(), true));
         }
     }
 

@@ -40,6 +40,7 @@ impl OpenAi {
                 })
                 .map(|m| wire_message(m, &mut ids)),
         );
+        repair_tool_results(&mut messages);
         json!({
             "model": self.config.model,
             "stream": true,
@@ -80,6 +81,57 @@ impl IdRemap {
             .get(old)
             .cloned()
             .unwrap_or_else(|| old.to_string())
+    }
+}
+
+/// Guarantee the provider invariant: every assistant `tool_calls` id is
+/// answered by a following tool message. History can violate it (an
+/// aborted run, a crash between records, an old session file) — insert a
+/// placeholder result for each unanswered call rather than 400.
+fn repair_tool_results(messages: &mut Vec<Value>) {
+    let mut i = 0;
+    while i < messages.len() {
+        let is_calling_assistant = messages[i]["role"] == "assistant"
+            && messages[i]["tool_calls"]
+                .as_array()
+                .is_some_and(|c| !c.is_empty());
+        if !is_calling_assistant {
+            i += 1;
+            continue;
+        }
+        let wanted: Vec<String> = messages[i]["tool_calls"]
+            .as_array()
+            .map(|calls| {
+                calls
+                    .iter()
+                    .filter_map(|c| c["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // The results that do follow (consecutive tool messages).
+        let mut answered = std::collections::HashSet::new();
+        let mut j = i + 1;
+        while j < messages.len() && messages[j]["role"] == "tool" {
+            if let Some(id) = messages[j]["tool_call_id"].as_str() {
+                answered.insert(id.to_string());
+            }
+            j += 1;
+        }
+        let missing: Vec<String> = wanted
+            .into_iter()
+            .filter(|id| !answered.contains(id))
+            .collect();
+        for (k, id) in missing.iter().enumerate() {
+            messages.insert(
+                j + k,
+                json!({
+                    "role": "tool",
+                    "tool_call_id": id,
+                    "content": "(no result recorded — the run was interrupted)",
+                }),
+            );
+        }
+        i = j + missing.len();
     }
 }
 
@@ -237,6 +289,31 @@ mod tests {
         // system + user + user: the empty assistant message is gone.
         assert_eq!(messages.len(), 3);
         assert!(messages.iter().all(|m| m["role"] != "assistant"));
+    }
+
+    #[test]
+    fn unanswered_tool_calls_get_placeholder_results() {
+        // An aborted run recorded the calls but only one result.
+        let mut assistant = Message {
+            role: Role::Assistant,
+            ..Message::default()
+        };
+        for id in ["a:1", "a:2"] {
+            assistant.tool_calls.push(ToolCall {
+                id: id.to_string(),
+                name: "read".to_string(),
+                args: serde_json::json!({}),
+            });
+        }
+        let mut result = Message::tool_result("a:1", "done".to_string(), false);
+        result.tool_call_id = Some("a:1".to_string());
+        let body = provider().body(&request(vec![Message::user("go"), assistant, result]));
+        let wire = body["messages"].as_array().unwrap();
+        // system, user, assistant(2 calls), real result, synthesized result.
+        assert_eq!(wire.len(), 5);
+        assert_eq!(wire[3]["role"], "tool");
+        assert_eq!(wire[4]["role"], "tool");
+        assert_eq!(wire[4]["tool_call_id"], wire[2]["tool_calls"][1]["id"]);
     }
 
     #[test]
