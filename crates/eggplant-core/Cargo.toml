@@ -13,3 +13,4 @@ anyhow.workspace = true
 tokio.workspace = true
 ignore.workspace = true
 regex = "1"
+log = "0.4"

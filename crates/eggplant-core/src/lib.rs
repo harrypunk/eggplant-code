@@ -13,6 +13,7 @@ pub mod fuzzy;
 pub mod grep;
 pub mod highlight;
 pub mod input;
+pub mod logging;
 pub mod mode;
 pub mod peek;
 pub mod viewport;

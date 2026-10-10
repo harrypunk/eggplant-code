@@ -4,7 +4,7 @@
 //! - `log`, not `tracing`: we're a sync TUI with one small runtime;
 //!   spans/subscribers are weight we don't need. The facade gives us
 //!   `log::info!` anywhere + runtime-adjustable levels.
-//! - One file, appended, at `$EGGPLANT_HOME/logs/eggplant.log`, with a
+//! - One file, appended, at `<data_root>/logs/eggplant.log`, with a
 //!   session header per start and a size cap (keep the tail) so a crash
 //!   loop can't fill the disk.
 //! - A panic hook writes panic + backtrace to the same file — a crash
@@ -50,15 +50,15 @@ impl Log for FileLogger {
     fn flush(&self) {}
 }
 
-/// The log file path (`$EGGPLANT_HOME/logs/eggplant.log`).
-pub fn path() -> Option<PathBuf> {
-    eggplant_agent::store::data_root().map(|root| root.join("logs").join("eggplant.log"))
+/// The log file path (`<data_root>/logs/eggplant.log`).
+pub fn path(data_root: &std::path::Path) -> PathBuf {
+    data_root.join("logs").join("eggplant.log")
 }
 
 /// Install the logger + panic hook. Returns the log path (for
 /// `app.logs`). Call once at startup, before the terminal is entered.
-pub fn init() -> Option<PathBuf> {
-    let path = path()?;
+pub fn init(data_root: &std::path::Path) -> Option<PathBuf> {
+    let path = path(data_root);
     std::fs::create_dir_all(path.parent()?).ok()?;
     cap_tail(&path);
     let file = std::fs::OpenOptions::new()

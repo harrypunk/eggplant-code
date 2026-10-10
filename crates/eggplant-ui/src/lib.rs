@@ -16,7 +16,6 @@ pub mod config;
 pub mod element;
 pub mod keymaps;
 pub mod layers;
-pub mod logging;
 pub mod runner;
 pub mod startup;
 pub mod statusline;

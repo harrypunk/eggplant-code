@@ -23,7 +23,9 @@ use crate::terminal::{CrosstermTerminal, TerminalGuard};
 /// Run the app to completion.
 pub fn run(path: Option<PathBuf>) -> io::Result<()> {
     // Logging first: everything after this lands in the log file.
-    crate::logging::init();
+    if let Some(root) = eggplant_agent::store::data_root() {
+        eggplant_core::logging::init(&root);
+    }
     log::info!("eggplant {} boot, path={path:?}", env!("CARGO_PKG_VERSION"));
     // Boot before entering the terminal: startup errors print normally.
     let (mut app, mut compositor) = startup::boot(&StartupTarget::resolve(path))?;
