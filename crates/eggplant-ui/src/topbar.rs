@@ -14,7 +14,7 @@ pub fn view(app: &App, area: Rect) -> Element {
     // mysteriously empty.
     let tabs: Vec<BufferTab> = buffers
         .into_iter()
-        .filter(|b| !b.scratch || b.modified || app.editor.buffer_count() == 1)
+        .filter(|b| b.viewer || !b.scratch || b.modified || app.editor.buffer_count() == 1)
         .map(|b| BufferTab {
             // Tabs show the file name, not the path (helix/vscode-style);
             // scratch buffers keep their display name.

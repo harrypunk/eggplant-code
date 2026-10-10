@@ -690,6 +690,7 @@ dependencies = [
  "crossterm 0.29.0",
  "eggplant-agent",
  "eggplant-core",
+ "log",
  "pulldown-cmark",
  "ratatui",
  "serde",

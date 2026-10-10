@@ -298,6 +298,30 @@ const VIEW_KEYS: &[(KeyStroke, ViewAction)] = &[
     (KeyStroke::ctrl('u'), ViewAction::PageUp),
 ];
 
+impl EditorAction {
+    /// Does this action mutate the buffer? (Mode entries into insert
+    /// count — they exist only to mutate.)
+    fn mutates(&self) -> bool {
+        use EditorAction::*;
+        matches!(
+            self,
+            DeleteChar
+                | DeleteLine
+                | DeleteSelection
+                | DeleteBackward
+                | DeleteForward
+                | PasteAfter
+                | Undo
+                | Redo
+                | Newline
+                | OpenBelow
+                | OpenAbove
+                | EnterInsert
+                | EnterAppend
+        )
+    }
+}
+
 /// The narrow context actions execute against (interface segregation):
 /// editing semantics need the buffer facade and a notification sink —
 /// nothing else.
@@ -309,6 +333,10 @@ pub trait EditorCtx {
 /// Execute one action. All arms converge on the facade; the multi-step ones
 /// (`open_below`, visual flavor toggles) live here and nowhere else.
 pub fn interpret(action: EditorAction, count: usize, ctx: &mut impl EditorCtx) {
+    if action.mutates() && ctx.editor().is_readonly() {
+        ctx.notify("buffer is read-only");
+        return;
+    }
     match action {
         EditorAction::MoveLeft => ctx.editor().move_left(count),
         EditorAction::MoveRight => ctx.editor().move_right(count),
@@ -381,11 +409,33 @@ pub fn interpret(action: EditorAction, count: usize, ctx: &mut impl EditorCtx) {
     }
 }
 
+impl Resolved {
+    /// Does executing this resolution mutate the buffer? Entering insert
+    /// mode counts (it exists only to mutate); yank and moves don't.
+    fn mutates(&self) -> bool {
+        match self {
+            Resolved::Act(action, _) => action.mutates(),
+            Resolved::Insert(_) | Resolved::DeleteMotion(_, _) => true,
+            Resolved::View(_)
+            | Resolved::YankMotion(_, _)
+            | Resolved::Swallowed
+            | Resolved::Ignored => false,
+        }
+    }
+}
+
 /// Execute a resolution with a payload (or a plain action). The single
 /// funnel for edit semantics: the modal layer calls this, and so does the
 /// registry's `CommandKind::Edit` dispatch — nothing else touches the
 /// facade from the UI crate.
 pub fn interpret_resolved(resolved: Resolved, ctx: &mut impl EditorCtx) {
+    // The read-only contract, enforced at the single funnel: mutating
+    // resolutions (and insert-mode entries, which only lead to
+    // mutations) are refused with a notice.
+    if resolved.mutates() && ctx.editor().is_readonly() {
+        ctx.notify("buffer is read-only");
+        return;
+    }
     match resolved {
         Resolved::Act(action, count) => interpret(action, count, ctx),
         Resolved::Insert(c) => ctx.editor().insert_char(c),
@@ -891,6 +941,27 @@ mod tests {
         fn notify(&mut self, message: &str) {
             self.notes.push(message.to_owned());
         }
+    }
+
+    #[test]
+    fn readonly_buffer_refuses_mutations_with_notice() {
+        let mut ctx = MockCtx {
+            editor: Editor::scratch().unwrap(),
+            notes: Vec::new(),
+        };
+        ctx.editor.insert_str("hello");
+        ctx.editor.set_readonly(true);
+        interpret_resolved(Resolved::Insert('x'), &mut ctx);
+        interpret(EditorAction::DeleteLine, 1, &mut ctx);
+        interpret(EditorAction::EnterInsert, 1, &mut ctx);
+        let text = ctx.editor.text();
+        assert!(
+            text.contains("hello") && !text.contains('x'),
+            "nothing mutated: {text:?}"
+        );
+        assert_eq!(ctx.notes.len(), 3, "each refused op told the user why");
+        // Yank still works — copying out of a read-only buffer is fine.
+        interpret(EditorAction::YankLine, 1, &mut ctx);
     }
 
     #[test]

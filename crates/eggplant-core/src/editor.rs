@@ -101,6 +101,11 @@ struct Buffer {
     doc: Document,
     /// Disk mtime at open/last save — the external-change baseline.
     saved_mtime: Option<std::time::SystemTime>,
+    /// Read-only buffers (log viewer, generated views) refuse every
+    /// mutation — editing ops no-op, save errors.
+    readonly: bool,
+    /// Display-name override for scratch viewers ("logs", docs, …).
+    name: Option<String>,
 }
 
 /// The file's mtime (None for scratch buffers / unreadable metadata).
@@ -165,14 +170,18 @@ impl Buffer {
             slot,
             doc,
             saved_mtime,
+            readonly: false,
+            name: None,
         }
     }
 
     fn display_name(&self) -> String {
-        self.doc
-            .path()
-            .map(relative_display)
-            .unwrap_or_else(|| "untitled".to_owned())
+        self.name.clone().unwrap_or_else(|| {
+            self.doc
+                .path()
+                .map(relative_display)
+                .unwrap_or_else(|| "untitled".to_owned())
+        })
     }
 }
 
@@ -212,6 +221,9 @@ pub struct BufferInfo {
     pub current: bool,
     /// Scratch buffers have no backing file.
     pub scratch: bool,
+    /// Named scratch viewer (`open_viewer`): the topbar always shows
+    /// these (anonymous pristine scratches are hidden as noise).
+    pub viewer: bool,
 }
 
 pub struct Editor {
@@ -310,12 +322,18 @@ impl Editor {
 
     /// Undo the last revision. False when already at the oldest change.
     pub fn undo(&mut self) -> bool {
+        if self.is_readonly() {
+            return false;
+        }
         let Some(i) = self.current else { return false };
         self.buffers[i].doc.undo(&mut self.view)
     }
 
     /// Redo the last undone revision. False when nothing to redo.
     pub fn redo(&mut self) -> bool {
+        if self.is_readonly() {
+            return false;
+        }
         let Some(i) = self.current else { return false };
         self.buffers[i].doc.redo(&mut self.view)
     }
@@ -385,6 +403,14 @@ impl Editor {
         if self.is_modified() && !force {
             bail!("unsaved changes (use ! to discard)");
         }
+        // Drop jumplist entries for the closing document. Without this,
+        // stale entries survive and crash the next buffer that happens to
+        // share the same DocumentId — every document we create carries
+        // DocumentId::default (helix's editor assigns unique ids; ours
+        // doesn't), so the old positions get mapped through the new
+        // document's changeset and panic in update_positions.
+        let doc_id = self.buffers[index].doc.id();
+        self.view.remove_document(&doc_id);
         self.buffers.remove(index);
         self.current = if self.buffers.is_empty() {
             None
@@ -421,6 +447,7 @@ impl Editor {
                 modified: b.doc.is_modified(),
                 current: Some(index) == self.current,
                 scratch: b.doc.path().is_none(),
+                viewer: b.name.is_some(),
             })
             .collect()
     }
@@ -448,6 +475,26 @@ impl Editor {
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// The current buffer's viewer name when it is a named scratch
+    /// viewer (`open_viewer`) — layers key viewer-local behavior on it.
+    pub fn current_viewer_name(&self) -> Option<&str> {
+        self.current.and_then(|i| self.buffers[i].name.as_deref())
+    }
+
+    /// Whether the current buffer is read-only.
+    pub fn is_readonly(&self) -> bool {
+        self.current
+            .map(|i| self.buffers[i].readonly)
+            .unwrap_or(false)
+    }
+
+    /// Mark the current buffer read-only (log viewer, generated views).
+    pub fn set_readonly(&mut self, readonly: bool) {
+        if let Some(i) = self.current {
+            self.buffers[i].readonly = readonly;
+        }
     }
 
     pub fn is_modified(&self) -> bool {
@@ -695,6 +742,9 @@ impl Editor {
 
     /// Visual `d`/`x`: delete the selection (also yanks), back to normal.
     pub fn delete_selection(&mut self) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         if !self.in_visual() || self.current.is_none() {
             return;
         }
@@ -1087,10 +1137,16 @@ impl Editor {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         self.insert_str(&c.to_string());
     }
 
     pub fn insert_str(&mut self, s: &str) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         if self.current.is_none() {
             return;
         }
@@ -1103,6 +1159,9 @@ impl Editor {
     }
 
     pub fn insert_newline(&mut self) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         let le = self.doc().line_ending.as_str().to_owned();
         self.insert_str(&le);
     }
@@ -1143,6 +1202,9 @@ impl Editor {
     }
 
     pub fn delete_backward(&mut self) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         if self.current.is_none() {
             return;
         }
@@ -1161,6 +1223,9 @@ impl Editor {
     /// Delete the grapheme under the cursor (`x` in normal mode).
     /// Never deletes the line ending.
     pub fn delete_char_at_cursor(&mut self) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         if self.current.is_none() {
             return;
         }
@@ -1232,6 +1297,9 @@ impl Editor {
 
     /// Delete a char range; the cursor lands on the range start.
     pub fn delete_range(&mut self, range: std::ops::Range<usize>) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         if self.current.is_none() || range.is_empty() {
             return;
         }
@@ -1269,6 +1337,9 @@ impl Editor {
 
     /// Delete the current line including its newline (`dd`).
     pub fn delete_line(&mut self) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         let Some(range) = self.current_line_range() else {
             return;
         };
@@ -1297,6 +1368,9 @@ impl Editor {
     /// Paste the register after the cursor (`p`): charwise after the cursor
     /// char; linewise on the line below. No-op with an empty register.
     pub fn paste_after(&mut self) {
+        if self.is_readonly() {
+            return; // read-only buffer: mutation refused
+        }
         let Some(register) = self.register.clone() else {
             return;
         };
@@ -1343,6 +1417,9 @@ impl Editor {
     /// string (eggplant-agent), then the new content lands as a single
     /// change, so one `u` reverts the agent's whole turn on this file.
     pub fn replace_text(&mut self, text: String) -> Result<()> {
+        if self.is_readonly() {
+            bail!("buffer is read-only");
+        }
         if self.current.is_none() {
             bail!("no buffer to replace");
         }
@@ -1353,9 +1430,63 @@ impl Editor {
         Ok(())
     }
 
+    /// Open (or refresh) a named, read-only viewer buffer — the log
+    /// viewer pattern: real editor semantics (search, yank) over
+    /// generated content. Re-opening the same name regenerates the
+    /// content in place and puts the cursor at the end (tail).
+    pub fn open_viewer(&mut self, name: &str, text: &str) {
+        if let Some(i) = self
+            .buffers
+            .iter()
+            .position(|b| b.name.as_deref() == Some(name))
+        {
+            let len = self.buffers[i].doc.text().len_chars();
+            // Internal regeneration bypasses the read-only guard — the
+            // guard exists to stop USER edits, not the generator.
+            let transaction = Transaction::change(
+                self.buffers[i].doc.text(),
+                [(0, len, Some(text.to_owned().into()))].into_iter(),
+            );
+            let view_id = self.view.id;
+            self.buffers[i].doc.apply(&transaction, view_id);
+            self.current = Some(i);
+            // Pending changes count toward is_modified — commit, then
+            // mark the committed revision as "saved" (generated content
+            // is definitionally clean).
+            self.commit_history();
+            self.buffers[i].doc.reset_modified();
+        } else {
+            let slot = self.next_slot;
+            self.next_slot += 1;
+            let mut doc = self.backend.scratch_document();
+            // A fresh document has no selection entry for our view yet.
+            doc.ensure_view_init(self.view.id);
+            let transaction = Transaction::change(
+                doc.text(),
+                [(0, 0, Some(text.to_owned().into()))].into_iter(),
+            );
+            let view_id = self.view.id;
+            doc.apply(&transaction, view_id);
+            let mut buffer = Buffer::new(doc, slot);
+            buffer.name = Some(name.to_owned());
+            buffer.readonly = true;
+            self.buffers.push(buffer);
+            self.current = Some(self.buffers.len() - 1);
+            self.commit_history();
+            let i = self.buffers.len() - 1;
+            self.buffers[i].doc.reset_modified();
+        }
+        self.restore_cursor();
+        self.move_last_line(); // viewers open at the tail
+        self.generation += 1;
+    }
+
     // ---- persistence ----
 
     pub fn save(&mut self) -> Result<()> {
+        if self.is_readonly() {
+            bail!("buffer is read-only");
+        }
         if self.current.is_none() {
             bail!("no buffer to save");
         }
@@ -1478,12 +1609,7 @@ impl Editor {
     }
 
     pub fn display_name(&self) -> Option<String> {
-        let doc = self.doc_opt()?;
-        Some(
-            doc.path()
-                .map(relative_display)
-                .unwrap_or_else(|| "untitled".to_owned()),
-        )
+        self.current.map(|i| self.buffers[i].display_name())
     }
 }
 
@@ -1507,6 +1633,33 @@ impl highlight::SnippetHighlighter for Editor {
 mod tests {
     use super::*;
     use crate::highlight::{SnippetHighlighter, SyntaxScope};
+
+    #[test]
+    fn viewer_buffers_are_named_readonly_and_regenerate() {
+        let mut editor = Editor::scratch().unwrap();
+        editor.open_viewer("logs", "line one\nline two");
+        assert!(editor.is_readonly());
+        assert_eq!(editor.display_name().as_deref(), Some("logs"));
+        // Cursor lands at the tail.
+        assert_eq!(editor.cursor().0, 1);
+        // Regenerating the same name replaces content in place.
+        editor.open_viewer("logs", "fresh");
+        assert_eq!(editor.buffer_count(), 2, "scratch + one viewer");
+        assert!(editor.text().contains("fresh"));
+        assert!(!editor.text().contains("line one"));
+        assert!(!editor.is_modified(), "generated content is clean");
+    }
+
+    #[test]
+    fn viewer_survives_close_and_reopen() {
+        // open → tail cursor → close → reopen (the crash report).
+        let mut editor = Editor::scratch().unwrap();
+        let big = "x\n".repeat(20_000);
+        editor.open_viewer("logs", &big);
+        editor.close_current_buffer(false).unwrap();
+        editor.open_viewer("logs", "short");
+        assert!(editor.text().contains("short"));
+    }
 
     #[test]
     fn poll_external_reloads_clean_and_flags_conflicts() {

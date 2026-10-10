@@ -148,6 +148,10 @@ pub enum AppAction {
         provider: String,
         model: String,
     },
+    /// Open (or refresh) the log viewer at a minimum level.
+    OpenLogs {
+        min: log::LevelFilter,
+    },
     /// Reload the current buffer from disk (discards local edits —
     /// the command confirms first when dirty).
     ReloadBuffer,
@@ -529,6 +533,18 @@ impl Compositor {
                             )));
                     }
                 }
+            }
+            AppAction::OpenLogs { min } => {
+                app.logs_level = min;
+                let Some(path) = crate::logging::path() else {
+                    return;
+                };
+                let content = std::fs::read_to_string(&path).unwrap_or_default();
+                let filtered = crate::logging::filter_level(&content, min);
+                let header = format!("logs [{min}] — press L for the level menu — read-only\n\n");
+                app.editor
+                    .open_viewer("logs", &format!("{header}{filtered}"));
+                self.broadcast(crate::action::ActionEvent::BufferChanged, app);
             }
             AppAction::ReloadBuffer => match app.editor.reload_current() {
                 Ok(()) => {

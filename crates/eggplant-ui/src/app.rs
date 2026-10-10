@@ -134,6 +134,8 @@ pub struct App {
     pub workspace: Workspace,
     /// The agent slice: session + UI transcript (docs/design/agent.md).
     pub agent: crate::agent::AgentState,
+    /// The log viewer's chosen minimum level (persists across opens).
+    pub logs_level: log::LevelFilter,
     /// Background threads → dispatch (validated keys, …). Data-only
     /// `BgEvent`s; the runner drains and maps them to actions.
     bg: (
@@ -188,6 +190,7 @@ impl App {
             editor,
             workspace: Workspace::new(std::env::current_dir().unwrap_or_default()),
             agent: crate::agent::AgentState::new(crate::agent::AgentSettings::default()),
+            logs_level: log::LevelFilter::Info,
             bg: std::sync::mpsc::channel(),
             notifications: Notifications::new(),
             theme: ThemeState::new(Theme::default(), crate::theme::resolve::Follow::Fixed),

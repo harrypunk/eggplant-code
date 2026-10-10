@@ -420,6 +420,11 @@ pub fn default_registry() -> Registry {
         Command::app("theme.cycle", "Cycle to the next color theme", |_| {
             vec![AppAction::CycleTheme]
         }),
+        Command::app("app.logs", "Open the application log", |_app| {
+            vec![AppAction::OpenLogs {
+                min: log::LevelFilter::Info,
+            }]
+        }),
         Command::app("agent.chat", "Chat with the agent (popup)", |_app| {
             vec![
                 AppAction::EnsureAgentSession,

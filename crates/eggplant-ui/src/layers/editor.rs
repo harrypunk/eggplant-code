@@ -6,7 +6,7 @@
 //! `crate::viewport`, moves the cursor through the `Editor` facade, and
 //! maps state to props. It owns no logic of its own.
 
-use eggplant_core::input::KeyEvent;
+use eggplant_core::input::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 
 use crate::action::{AppAction, Handled};
@@ -149,6 +149,19 @@ impl Layer for EditorSurface {
     /// interpreter; `View` intents are local (scroll) plus cursor actions;
     /// the next frame's `resize` re-syncs the viewport.
     fn handle_key(&mut self, key: KeyEvent, app: &App) -> Handled {
+        // Viewer-local keys: L opens the level menu (the picker — the
+        // float+arrows+Enter widget every other chooser uses). Plain
+        // digits stay motion counts; terminals own Alt+digit (tabs).
+        let shift_or_none =
+            key.modifiers.is_empty() || key.modifiers == eggplant_core::input::KeyModifiers::SHIFT;
+        if app.editor.current_viewer_name() == Some("logs")
+            && shift_or_none
+            && key.code == KeyCode::Char('L')
+        {
+            return Handled::one(AppAction::PushLayer(Box::new(
+                super::level_picker::log_level_picker(app),
+            )));
+        }
         let (pending, resolved) = editing::resolve(
             &app.input.pending,
             app.editor.mode(),

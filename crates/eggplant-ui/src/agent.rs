@@ -225,6 +225,7 @@ impl AgentState {
                 }
             }
             AgentEvent::Error(message) => {
+                log::error!(target: "agent", "{message}");
                 self.transcript
                     .push(ChatItem::Assistant(format!("⚠ {message}")));
             }
@@ -312,6 +313,9 @@ pub fn serve_host(app: &mut App, call: &HostCall) -> Result<HostReply, String> {
         HostCall::Write { path, content } => {
             let path = resolve(app, path);
             open_in_editor(app, &path)?;
+            if app.editor.is_readonly() {
+                return Err(format!("{}: buffer is read-only", path.display()));
+            }
             app.editor.replace_text(content.clone()).map_err(err)?;
             app.editor.save().map_err(err)?;
             Ok(HostReply::Ok)
@@ -319,6 +323,9 @@ pub fn serve_host(app: &mut App, call: &HostCall) -> Result<HostReply, String> {
         HostCall::Edit { path, edits } => {
             let path = resolve(app, path);
             open_in_editor(app, &path)?;
+            if app.editor.is_readonly() {
+                return Err(format!("{}: buffer is read-only", path.display()));
+            }
             let new_text = eggplant_agent::tools::edit::apply_edits(&app.editor.text(), edits)?;
             app.editor.replace_text(new_text).map_err(err)?;
             app.editor.save().map_err(err)?;

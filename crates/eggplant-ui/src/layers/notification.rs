@@ -74,6 +74,13 @@ impl Notifications {
     }
 
     pub fn push(&mut self, n: Notification) {
+        // Errors and warnings are exactly what you need after a crash —
+        // mirror them into the application log.
+        match n.level {
+            Level::Error => log::error!("{}", n.message),
+            Level::Warn => log::warn!("{}", n.message),
+            Level::Info => log::info!("{}", n.message),
+        }
         self.items.push(n);
     }
 
